@@ -5,8 +5,7 @@
 
 ``ToolkitUserError`` is the contract between the tools and the CLI indicating user input error
 and the CLI reports it as a single-line message instead of a traceback.
-Anything else is treated as a bug in the toolkit and keeps its traceback
-
+Anything else is treated as a bug in the toolkit and keeps its traceback.
 """
 
 

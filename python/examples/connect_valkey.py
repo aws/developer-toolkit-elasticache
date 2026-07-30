@@ -21,14 +21,12 @@ class ElastiCacheCredentialProvider(CredentialProvider):
         self._auth = auth
 
     def get_credentials(self):
-        # valkey-py pulls this on every (re)connection, so the token stays fresh
         return self._auth.user_id, self._auth.get_token()
 
 
 # serverless_cache_name is the ElastiCache cache NAME — used as the SigV4 signing
-# host. It is NOT the connection endpoint DNS below. Signing with the endpoint
-# instead of the cache name produces a token the server rejects (WRONGPASS).
-# (For a node-based cluster, use replication_group_id="..." instead.)
+# host.
+# For a node-based cluster, use replication_group_id="..." instead.
 auth = ElastiCacheIAMAuth(
     serverless_cache_name="my-cache",
     user_id="my-iam-user",

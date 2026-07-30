@@ -6,7 +6,6 @@
 ElastiCacheIAMAuth is client-agnostic — it only vends get_token(). This example
 shows the small bridge you can write in your own code to hook it into redis-py's
 CredentialProvider interface.
-
 """
 
 import redis
@@ -25,8 +24,8 @@ class ElastiCacheCredentialProvider(CredentialProvider):
         return self._auth.user_id, self._auth.get_token()
 
 
-# serverless_cache_name is the Serverless ElastiCache cache name used as the
-# SigV4 signing host.
+# serverless_cache_name is the ElastiCache cache NAME — used as the SigV4 signing
+# host.
 # For a node-based cluster, use replication_group_id="..." instead.
 auth = ElastiCacheIAMAuth(
     serverless_cache_name="my-cache",
@@ -35,7 +34,7 @@ auth = ElastiCacheIAMAuth(
 )
 
 client = redis.Redis(
-    host="my-cache-abc123.serverless.use1.cache.amazonaws.com",
+    host="my-cache-abc123.serverless.use1.cache.amazonaws.com",  # connection endpoint (DNS)
     port=6379,
     ssl=True,
     credential_provider=ElastiCacheCredentialProvider(auth),

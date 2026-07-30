@@ -228,6 +228,11 @@ def test_cache_name_is_lowercased(mock_session):
         "my-cache/?X=1",  # query injection into the host
         "my cache",  # whitespace
         "my_cache",  # underscore not allowed
+        "1-cache",  # must start with a letter, not a digit
+        "-cache",  # must start with a letter, not a hyphen
+        "cache-",  # cannot end with a hyphen
+        "my--cache",  # cannot contain two consecutive hyphens
+        "-",  # a bare hyphen is neither
     ],
 )
 def test_invalid_cache_name_rejected(mock_session, bad_name):
@@ -237,6 +242,24 @@ def test_invalid_cache_name_rejected(mock_session, bad_name):
     )
     with pytest.raises(InvalidCacheNameError):
         auth.get_token()
+
+
+@pytest.mark.parametrize(
+    "good_name",
+    [
+        "c",  # a single letter is the shortest legal name
+        "my-cache",
+        "cache1",
+        "a-1-b-2",  # hyphens between alphanumerics, repeatedly
+        "MyCache",  # signed lowercase, but accepted as given
+    ],
+)
+def test_valid_cache_name_accepted(mock_session, good_name):
+    """Tightening the pattern must not reject names the service accepts."""
+    auth = ElastiCacheIAMAuth(
+        serverless_cache_name=good_name, user_id=USER, region=REGION, session=mock_session
+    )
+    assert auth.get_token().startswith(f"{good_name.lower()}/")
 
 
 def test_empty_cache_name_rejected_as_missing_target(mock_session):

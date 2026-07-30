@@ -23,11 +23,10 @@ _SIGNING_SERVICE = "elasticache"
 # The signed request is a presigned URL; the token is that URL without the scheme.
 _URL_SCHEME_PREFIX = "https://"
 
-# ElastiCache serverless cache names / replication group ids are limited to letters, digits,
-# and hyphens. The name is used as the SigV4 signing host, so validating it here
-# prevents a malformed or hostile value from being signed against an unintended host
-# and producing a silently-wrong token.
-_CACHE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
+# The cache name is the SigV4 signing host, validating it keeps a malformed or
+# hostile value from being signed against a host and producing a wrong token.
+# Matching documented ElastiCache constraints in cache name.
+_CACHE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
 # Honoured on top of botocore's own region resolution — see _resolve_region.
 _REGION_ENV_VAR = "AWS_REGION"
@@ -38,9 +37,9 @@ class InvalidCacheNameError(ToolkitUserError, ValueError):
 
     def __init__(self, cache_name: str) -> None:
         super().__init__(
-            f"Invalid cache name {cache_name!r}: expected only letters, digits, and "
-            "hyphens (the serverless cache name / replication group id, not the "
-            "endpoint DNS)."
+            f"Invalid cache name {cache_name!r}: expected letters, digits, and hyphens, "
+            "starting with a letter, with no trailing hyphen and no two consecutive "
+            "hyphens (the serverless cache name / replication group id)."
         )
 
 
@@ -49,7 +48,7 @@ class TargetRequiredError(ToolkitUserError, ValueError):
 
     def __init__(self) -> None:
         super().__init__(
-            "exactly one of serverless_cache_name or replication_group_id is required"
+            "Exactly one of serverless_cache_name or replication_group_id is required."
         )
 
 
