@@ -1,0 +1,25 @@
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg
+
+# Test / coverage output
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store

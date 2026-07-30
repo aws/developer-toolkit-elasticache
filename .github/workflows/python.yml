@@ -1,0 +1,71 @@
+name: Python CI
+
+# Path-filtered so the Python package builds standalone: this workflow only
+# runs when files under python/ (or this workflow itself) change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "python/**"
+      - ".github/workflows/python.yml"
+  pull_request:
+    paths:
+      - "python/**"
+      - ".github/workflows/python.yml"
+
+defaults:
+  run:
+    working-directory: python
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev dependencies
+        run: python -m pip install -e ".[dev]"
+
+      # Lint and format are interpreter-independent, so they run once rather
+      # than across the whole test matrix.
+      - name: Ruff lint
+        run: python -m ruff check .
+
+      - name: Ruff format
+        run: python -m ruff format --check .
+
+  test:
+    name: py${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling on each OS, plus Apple Silicon. Every version
+        # in requires-python is covered on Linux; the other platforms test the
+        # ends of the range, which is where interpreter differences show up.
+        os: [ubuntu-latest, windows-latest, macos-14]
+        python-version: ["3.10", "3.13"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package with dev dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -q

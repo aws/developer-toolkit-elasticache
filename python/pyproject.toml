@@ -1,0 +1,97 @@
+[build-system]
+# 77 is the first release that understands PEP 639: the bare SPDX expression in
+# `license` below, and the default license-files glob that ships LICENSE/NOTICE in
+# the wheel. Older setuptools only accepts the pre-PEP-639 table form
+# (`license = {text = ...}`) and fails metadata generation outright. Nothing in
+# normal development catches this, because pip's isolated build pulls the newest
+# setuptools regardless of this floor — it only bites a pinned or vendored build.
+requires = ["setuptools>=77.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "developer-toolkit-elasticache"
+version = "0.1.0.dev0"
+description = "Developer toolkit for Amazon ElastiCache"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "botocore>=1.29.0",
+]
+# NOTE: This project is in active development and is NOT ready to publish.
+# The "Private :: Do Not Upload" classifier makes PyPI reject any upload of
+# this package. Do not remove it until we have explicitly decided to publish.
+classifiers = [
+    "Private :: Do Not Upload",
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+# The floor in requires-python. Keeps ruff from suggesting syntax that would not
+# run on the oldest interpreter we claim to support.
+target-version = "py310"
+line-length = 90
+
+[tool.ruff.lint]
+extend-select = [
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "I",    # isort
+    "INP",  # flake8-no-pep420 (implicit namespace packages)
+    "PL",   # pylint
+    "RUF",  # ruff-specific rules
+    "S",    # flake8-bandit (security)
+    "T20",  # flake8-print
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+
+# Every rule exempted below must be selected above, or the exemption is inert and
+# the config only looks like it is enforcing something.
+[tool.ruff.lint.per-file-ignores]
+# A CLI's whole job is to write to stdout/stderr, so printing is intended here
+# rather than lint debt.
+"src/developer_toolkit_elasticache/cli.py" = ["T201"]
+# Asserts and magic values are the point of a test, and tests are collected by path
+# rather than imported as a package.
+"tests/**/*" = ["S101", "PLR2004", "INP001"]
+# The examples are illustrative scripts whose job is to print, and they are not an
+# importable package.
+"examples/**/*" = ["T201", "INP001"]
+
+[tool.pytest.ini_options]
+# The examples/ scripts are runnable demos that need live AWS credentials and a
+# reachable cache, and they do their work at import time, so collecting one would
+# fail CI. Two independent guards, because testpaths alone is only a default and is
+# silently overridden the moment anyone runs `pytest .` or `pytest <path>`:
+#   1. testpaths     — bare `pytest` looks only at tests/
+#   2. norecursedirs — examples/ is skipped even when a path IS given
+# Keep example filenames clear of test_*.py / *_test.py as well, since a matching
+# name is what turned this into a CI failure in the first place.
+testpaths = ["tests"]
+norecursedirs = ["examples", "build", "dist", ".*"]
+
+[project.scripts]
+developer-toolkit-elasticache = "developer_toolkit_elasticache.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: py.typed tells a consumer's type checker that the annotations in this
+# package are meant to be used. Without the marker they are ignored downstream no
+# matter how completely the code is annotated, and it has to be declared here or it
+# does not make it into the wheel.
+[tool.setuptools.package-data]
+developer_toolkit_elasticache = ["py.typed"]
