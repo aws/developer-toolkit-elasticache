@@ -3,14 +3,22 @@
 
 """Developer Toolkit for Amazon ElastiCache."""
 
-from developer_toolkit_elasticache.errors import ToolkitUserError
+from developer_toolkit_elasticache.errors import (
+    ConfigurationError,
+    InvalidParameterError,
+    TargetRequiredError,
+    ToolkitUserError,
+)
 from developer_toolkit_elasticache.token_generator import (
-    ElastiCacheIAMAuth,
+    ElastiCacheIAMAuthTokenProvider,
     generate_iam_auth_token,
 )
 
 __all__ = [
-    "ElastiCacheIAMAuth",
+    "ConfigurationError",
+    "ElastiCacheIAMAuthTokenProvider",
+    "InvalidParameterError",
+    "TargetRequiredError",
     "ToolkitUserError",
     "generate_iam_auth_token",
 ]

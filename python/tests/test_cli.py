@@ -6,8 +6,7 @@ import argparse
 import pytest
 
 from developer_toolkit_elasticache import cli
-from developer_toolkit_elasticache.errors import ToolkitUserError
-from developer_toolkit_elasticache.token_generator import InvalidCacheNameError
+from developer_toolkit_elasticache.errors import InvalidParameterError, ToolkitUserError
 
 CACHE = "my-cache"
 USER = "testuser"
@@ -96,7 +95,7 @@ def test_expected_error_is_a_message_not_a_traceback(capsys, monkeypatch):
     """A user mistake exits 1 with one line on stderr and nothing on stdout."""
 
     def _raise(**_kwargs):
-        raise InvalidCacheNameError("bad name")
+        raise InvalidParameterError("serverless_cache_name", "bad name", "nope")
 
     monkeypatch.setattr(cli, "generate_iam_auth_token", _raise)
 

@@ -3,7 +3,7 @@
 
 """Example: bridge the generic token engine into redis-py.
 
-ElastiCacheIAMAuth is client-agnostic — it only vends get_token(). This example
+ElastiCacheIAMAuthTokenProvider is client-agnostic — it only vends get_token(). This example
 shows the small bridge you can write in your own code to hook it into redis-py's
 CredentialProvider interface.
 """
@@ -11,13 +11,13 @@ CredentialProvider interface.
 import redis
 from redis.credentials import CredentialProvider
 
-from developer_toolkit_elasticache import ElastiCacheIAMAuth
+from developer_toolkit_elasticache import ElastiCacheIAMAuthTokenProvider
 
 
 class ElastiCacheCredentialProvider(CredentialProvider):
     """Customer-owned bridge from the generic token engine to redis-py."""
 
-    def __init__(self, auth: ElastiCacheIAMAuth):
+    def __init__(self, auth: ElastiCacheIAMAuthTokenProvider):
         self._auth = auth
 
     def get_credentials(self):
@@ -27,7 +27,7 @@ class ElastiCacheCredentialProvider(CredentialProvider):
 # serverless_cache_name is the ElastiCache cache NAME — used as the SigV4 signing
 # host.
 # For a node-based cluster, use replication_group_id="..." instead.
-auth = ElastiCacheIAMAuth(
+auth = ElastiCacheIAMAuthTokenProvider(
     serverless_cache_name="my-cache",
     user_id="my-iam-user",
     region="us-east-1",

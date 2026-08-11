@@ -49,12 +49,14 @@ jobs:
         # in requires-python is covered on Linux; the other platforms test the
         # ends of the range, which is where interpreter differences show up.
         os: [ubuntu-latest, windows-latest, macos-14]
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.10", "3.14"]
         include:
           - os: ubuntu-latest
             python-version: "3.11"
           - os: ubuntu-latest
             python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
 
     steps:
       - uses: actions/checkout@v4

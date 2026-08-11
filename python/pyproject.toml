@@ -16,7 +16,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
-    "botocore>=1.29.0",
+    "botocore>=1.43.0",
 ]
 # NOTE: This project is in active development and is NOT ready to publish.
 # The "Private :: Do Not Upload" classifier makes PyPI reject any upload of
@@ -30,6 +30,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.optional-dependencies]
@@ -65,8 +66,9 @@ extend-select = [
 # rather than lint debt.
 "src/developer_toolkit_elasticache/cli.py" = ["T201"]
 # Asserts and magic values are the point of a test, and tests are collected by path
-# rather than imported as a package.
-"tests/**/*" = ["S101", "PLR2004", "INP001"]
+# rather than imported as a package. S105 fires on the known-answer token strings,
+# which are expected signed URLs to assert against, not secrets.
+"tests/**/*" = ["S101", "PLR2004", "INP001", "S105"]
 # The examples are illustrative scripts whose job is to print, and they are not an
 # importable package.
 "examples/**/*" = ["T201", "INP001"]

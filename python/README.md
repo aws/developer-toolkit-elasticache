@@ -6,7 +6,7 @@ CLI.
 Install from source:
 
 ```bash
-python -m pip install -e ".[dev]"
+python3 -m pip install -e ".[dev]"
 ```
 
 This also registers the `developer-toolkit-elasticache` CLI.
@@ -50,7 +50,7 @@ For a node-based cluster, pass `replication_group_id` instead of
 in that order — and only needs to be passed to sign for a different region.
 
 For clients that re-authenticate on reconnect (redis-py, valkey-py), use
-`ElastiCacheIAMAuth` and let the client call `get_token()` when it opens a
+`ElastiCacheIAMAuthTokenProvider` and let the client call `get_token()` when it opens a
 connection. See the [`examples/`](examples/) directory.
 
 From the CLI:
