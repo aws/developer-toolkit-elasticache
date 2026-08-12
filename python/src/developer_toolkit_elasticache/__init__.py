@@ -6,8 +6,7 @@
 from developer_toolkit_elasticache.errors import (
     ConfigurationError,
     InvalidParameterError,
-    TargetRequiredError,
-    ToolkitUserError,
+    ToolkitInputError,
 )
 from developer_toolkit_elasticache.token_generator import (
     ElastiCacheIAMAuthTokenProvider,
@@ -18,7 +17,6 @@ __all__ = [
     "ConfigurationError",
     "ElastiCacheIAMAuthTokenProvider",
     "InvalidParameterError",
-    "TargetRequiredError",
-    "ToolkitUserError",
+    "ToolkitInputError",
     "generate_iam_auth_token",
 ]

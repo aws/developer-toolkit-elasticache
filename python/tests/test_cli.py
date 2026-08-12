@@ -6,7 +6,7 @@ import argparse
 import pytest
 
 from developer_toolkit_elasticache import cli
-from developer_toolkit_elasticache.errors import InvalidParameterError, ToolkitUserError
+from developer_toolkit_elasticache.errors import InvalidParameterError, ToolkitInputError
 
 CACHE = "my-cache"
 USER = "testuser"
@@ -95,7 +95,9 @@ def test_expected_error_is_a_message_not_a_traceback(capsys, monkeypatch):
     """A user mistake exits 1 with one line on stderr and nothing on stdout."""
 
     def _raise(**_kwargs):
-        raise InvalidParameterError("serverless_cache_name", "bad name", "nope")
+        raise InvalidParameterError(
+            "Invalid value ('bad name') for parameter 'serverless_cache_name': nope"
+        )
 
     monkeypatch.setattr(cli, "generate_iam_auth_token", _raise)
 
@@ -122,7 +124,7 @@ def _register_extra_tool(monkeypatch, func):
     """Add a second subcommand named ``extra`` the way a real new tool would be.
 
     These tests cover the contract ``main`` offers to future tools — dispatch via
-    ``func``, conditional stdout, ``ToolkitUserError`` handling — so that adding a
+    ``func``, conditional stdout, ``ToolkitInputError`` handling — so that adding a
     tool cannot silently inherit wrong behaviour.
     """
 
@@ -147,9 +149,9 @@ def test_command_returning_none_prints_nothing(capsys, monkeypatch):
 
 
 def test_new_tools_user_error_is_a_message_not_a_traceback(capsys, monkeypatch):
-    """Deriving from ToolkitUserError is all a new tool needs for clean reporting."""
+    """Deriving from ToolkitInputError is all a new tool needs for clean reporting."""
 
-    class ExtraToolError(ToolkitUserError):
+    class ExtraToolError(ToolkitInputError):
         pass
 
     def _raise(_args):

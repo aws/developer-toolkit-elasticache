@@ -15,7 +15,6 @@ from developer_toolkit_elasticache import (
 from developer_toolkit_elasticache.errors import (
     ConfigurationError,
     InvalidParameterError,
-    TargetRequiredError,
 )
 
 CACHE = "my-cache"
@@ -118,7 +117,7 @@ def test_generate_iam_auth_token_replication_group(mock_session):
 
 
 def test_generate_iam_auth_token_requires_a_target(mock_session):
-    with pytest.raises(TargetRequiredError):
+    with pytest.raises(InvalidParameterError):
         generate_iam_auth_token(user_id=USER, region=REGION, session=mock_session)
 
 
@@ -208,7 +207,7 @@ def test_empty_credential_chain_raises():
 )
 def test_requires_exactly_one_target(mock_session, kwargs):
     """Exactly one of serverless_cache_name / replication_group_id is required."""
-    with pytest.raises(TargetRequiredError):
+    with pytest.raises(InvalidParameterError):
         ElastiCacheIAMAuthTokenProvider(
             user_id=USER, region=REGION, session=mock_session, **kwargs
         )
@@ -358,7 +357,7 @@ def test_configuration_error_is_not_a_parameter_error():
 
 def test_empty_cache_name_rejected_as_missing_target(mock_session):
     """An empty name is indistinguishable from no name, so it fails earlier."""
-    with pytest.raises(TargetRequiredError):
+    with pytest.raises(InvalidParameterError):
         ElastiCacheIAMAuthTokenProvider(
             serverless_cache_name="", user_id=USER, region=REGION, session=mock_session
         )

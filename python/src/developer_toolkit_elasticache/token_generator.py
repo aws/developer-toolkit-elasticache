@@ -13,7 +13,6 @@ from botocore.session import Session
 from developer_toolkit_elasticache.errors import (
     ConfigurationError,
     InvalidParameterError,
-    TargetRequiredError,
 )
 
 if TYPE_CHECKING:
@@ -52,30 +51,19 @@ _NO_CREDENTIALS_MESSAGE = (
 )
 
 
-_CACHE_NAME_REASON = (
-    "expected letters, digits, and hyphens, starting with a letter, with no "
-    "trailing hyphen and no two consecutive hyphens"
-)
-_USER_ID_REASON = "expected a letter followed by letters, digits, and hyphens"
+def _validate_and_normalize(parameter: str, value: str, pattern: re.Pattern[str]) -> str:
+    """Lowercase ``value``, check it against ``pattern``, and return the normalized form.
 
-
-def _validate_cache_name(parameter: str, cache_name: str) -> None:
-    if not _CACHE_NAME_PATTERN.match(cache_name):
-        raise InvalidParameterError(parameter, cache_name, _CACHE_NAME_REASON)
-
-
-def _validate_user_id(user_id: str) -> str:
-    """Validate the user id and return it normalized to lowercase.
-
-    ElastiCache stores the user id as a lowercase string, so the value signed into
-    the token (``User=``) AND the username the client sends on AUTH must both be
-    lowercase to match — otherwise the server rejects the token as ``WRONGPASS``.
-    Normalizing once here, at the single point the value enters the toolkit, keeps
-    the signature and the ``user_id`` property from ever disagreeing.
+    ElastiCache stores cache names and user ids lowercase, so a value is normalized
+    before both matching and signing; the value signed into the token and the value
+    the client sends must match server-side.
     """
-    normalized = user_id.lower()
-    if not _USER_ID_PATTERN.match(normalized):
-        raise InvalidParameterError("user_id", user_id, _USER_ID_REASON)
+    normalized = value.lower()
+    if not pattern.match(normalized):
+        raise InvalidParameterError(
+            f"Invalid value ({value!r}) for parameter {parameter!r}: "
+            f"must match {pattern.pattern}"
+        )
     return normalized
 
 
@@ -83,19 +71,23 @@ def _resolve_target(
     serverless_cache_name: str | None, replication_group_id: str | None
 ) -> tuple[str, bool]:
     """Map the mutually-exclusive name arguments to ``(cache_name, serverless)``.
-
-    Exactly one of ``serverless_cache_name`` or ``replication_group_id`` must be
-    provided. Which one is used determines the resource type baked into the
-    signature. The chosen value is validated here, under its own parameter name,
-    so the error names the argument the caller passed.
+    The chosen value is validated here, under its own parameter name, so the
+    error names the argument the caller passed.
     """
     if serverless_cache_name and not replication_group_id:
-        _validate_cache_name("serverless_cache_name", serverless_cache_name)
-        return serverless_cache_name, True
+        cache_name = _validate_and_normalize(
+            "serverless_cache_name", serverless_cache_name, _CACHE_NAME_PATTERN
+        )
+        return cache_name, True
     if replication_group_id and not serverless_cache_name:
-        _validate_cache_name("replication_group_id", replication_group_id)
-        return replication_group_id, False
-    raise TargetRequiredError
+        cache_name = _validate_and_normalize(
+            "replication_group_id", replication_group_id, _CACHE_NAME_PATTERN
+        )
+        return cache_name, False
+    raise InvalidParameterError(
+        "Invalid parameter combination for 'serverless_cache_name' and "
+        "'replication_group_id': exactly one must be provided."
+    )
 
 
 def _resolve_region(region: str | None, session: Session) -> str:
@@ -150,18 +142,14 @@ def _sign_token(
     Cache names are lowercased at creation time, so the name must be
     signed in lowercase to avoid auth errors.
 
-    ``user_id`` is the ElastiCache **user id** — the value used to construct the
-    User ARN referenced in the IAM policy. It is signed as the ``User`` request
-    parameter, lowercased, because the service stores the user id lowercase (see
-    ``_validate_user_id``). (For IAM-enabled users this must equal the Redis/Valkey
-    ACL user name, but conceptually it is the ElastiCache user id, not the ACL name.)
+    ``user_id`` is signed as the ``User`` request parameter, lowercased because
+    the service stores the user id lowercase (see ``_validate_and_normalize``).
+    (For IAM-enabled users this must equal the Redis/Valkey ACL user name, but
+    conceptually it is the ElastiCache user id, not the ACL name.)
 
-    ``serverless`` selects the one signing difference between the two IAM-auth
-    modes: serverless caches include ``ResourceType=ServerlessCache`` in the
-    signed request, node-based replication groups omit ``ResourceType`` entirely.
-    It is part of the signature, so it cannot be appended after signing.
+    ``serverless`` is part of the signature, so it cannot be appended after signing.
     """
-    user_id = _validate_user_id(user_id)
+    user_id = _validate_and_normalize("user_id", user_id, _USER_ID_PATTERN)
 
     params = {"Action": "connect", "User": user_id}
     if serverless:
@@ -215,9 +203,8 @@ class ElastiCacheIAMAuthTokenProvider:
     bridges it into whatever client you use (see the ``examples/`` directory).
 
     Provide exactly one of ``serverless_cache_name`` (for a serverless cache) or
-    ``replication_group_id`` (for a node-based cluster); the choice selects the
-    resource type baked into the signature.
-    ``user_id`` is the ElastiCache user id used to build the User ARN in the IAM policy.
+    ``replication_group_id`` (for a node-based cluster).
+    ``user_id`` is the ElastiCache user id.
     ``region`` defaults to the region the session resolves, so it only needs to be
     passed to sign for a region other than the configured one.
 
@@ -239,7 +226,7 @@ class ElastiCacheIAMAuthTokenProvider:
         self._cache_name, self._serverless = _resolve_target(
             serverless_cache_name, replication_group_id
         )
-        self._user_id = _validate_user_id(user_id)
+        self._user_id = _validate_and_normalize("user_id", user_id, _USER_ID_PATTERN)
         self._session = session or Session()
         # Resolved once here rather than per call: unlike credentials, the region is
         # static configuration, and a missing region should surface at construction

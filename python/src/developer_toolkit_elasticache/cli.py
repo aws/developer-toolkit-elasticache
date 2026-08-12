@@ -5,7 +5,7 @@ import argparse
 import sys
 
 from developer_toolkit_elasticache import generate_iam_auth_token
-from developer_toolkit_elasticache.errors import ToolkitUserError
+from developer_toolkit_elasticache.errors import ToolkitInputError
 
 
 def _add_generate_iam_auth_token_args(parser: argparse.ArgumentParser) -> None:
@@ -44,7 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
     Each tool contributes one subparser and sets ``func`` to a callable taking the
     parsed namespace. That callable returns the text to write to stdout, or ``None``
     if the tool has nothing to print. It signals a user-fixable failure by raising
-    a ``ToolkitUserError`` subclass; ``main`` handles the rest, so adding a tool
+    an ``ToolkitInputError`` subclass; ``main`` handles the rest, so adding a tool
     means adding a subparser here and nothing else.
     """
     parser = argparse.ArgumentParser(
@@ -68,16 +68,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         output = args.func(args)
-    except ToolkitUserError as e:
-        # A user mistake or missing prerequisite, not a bug here: report it as one
-        # line. Anything else keeps its traceback, which is what you need to debug
-        # an unexpected failure.
+    except ToolkitInputError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-
-    # A tool's result goes to stdout on its own so it can be captured directly, e.g.
-    # export VALKEYCLI_AUTH=$(developer-toolkit-elasticache generate_iam_auth_token ...)
-    # A tool with nothing to return prints nothing rather than a blank line.
     if output is not None:
         print(output)
     return 0
