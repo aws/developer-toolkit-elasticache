@@ -280,6 +280,19 @@ def test_invalid_replication_group_id_names_that_parameter(mock_session):
         )
 
 
+def test_error_never_echoes_the_caller_value(mock_session):
+    hostile = "evil.com/inject\nlog-entry"
+    with pytest.raises(InvalidParameterError) as excinfo:
+        ElastiCacheIAMAuthTokenProvider(
+            serverless_cache_name=hostile,
+            user_id=USER,
+            region=REGION,
+            session=mock_session,
+        )
+    assert hostile not in str(excinfo.value)
+    assert "serverless_cache_name" in str(excinfo.value)
+
+
 @pytest.mark.parametrize(
     "good_name",
     [
@@ -306,10 +319,10 @@ def test_valid_cache_name_accepted(mock_session, good_name):
         "-user",  # must start with a letter, not a hyphen
         "user name",  # whitespace
         "user@host",  # userinfo-style value
-        "user.name",  # dots only allowed in the default.iam-user special case
-        "default.",  # nothing after the dot
-        "default.foo",  # only the exact default.iam-user is allowed
-        "default.iam-user-2",  # not the exact service-managed name
+        "user.name",  # a dot is only allowed via the "default." prefix
+        "default.",  # nothing after the prefix
+        "default.1x",  # label after the prefix must start with a letter
+        "notdefault.foo",  # the prefix must be literally "default."
     ],
 )
 def test_invalid_user_id_rejected(mock_session, bad_user_id):
@@ -329,9 +342,9 @@ def test_invalid_user_id_rejected(mock_session, bad_user_id):
         "iam-user",
         "myuser",
         "default",  # service-managed default user
-        "default.iam-user",  # service-managed IAM user (the only dotted name allowed)
-        "DEFAULT.IAM-USER",  # same service-managed user, case-normalized before matching
-        "Default.Iam-User",  # mixed case likewise normalizes and is accepted
+        "default.iam-user",  # service-managed IAM user
+        "default.other",  # any default.* is accepted
+        "DEFAULT.IAM-USER",  # case-normalized before matching
         "a-1-b-2",
     ],
 )

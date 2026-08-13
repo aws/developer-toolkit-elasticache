@@ -31,11 +31,9 @@ _URL_SCHEME_PREFIX = "https://"
 # Matching documented ElastiCache constraints in cache name.
 _CACHE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
 
-# The user id is signed as the User query parameter, so it does not
-# need the stricter host-safety rules the cache name does. This is the ElastiCache
-# service UserId pattern (letter, then letters/digits/hyphens). Explicit exception
-# for default service-managed users
-_USER_ID_PATTERN = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9\-]*|default\.iam-user)$")
+# ElastiCache service UserId pattern, with an optional "default." prefix for
+# service-managed users (e.g. default.iam-user).
+_USER_ID_PATTERN = re.compile(r"^(?:default\.)?[a-zA-Z][a-zA-Z0-9\-]*$")
 
 # Honoured on top of botocore's own region resolution — see _resolve_region.
 _REGION_ENV_VAR = "AWS_REGION"
@@ -60,9 +58,10 @@ def _validate_and_normalize(parameter: str, value: str, pattern: re.Pattern[str]
     """
     normalized = value.lower()
     if not pattern.match(normalized):
+        # Never echo the caller's value back in the message — name the parameter
+        # and the accepted pattern only.
         raise InvalidParameterError(
-            f"Invalid value ({value!r}) for parameter {parameter!r}: "
-            f"must match {pattern.pattern}"
+            f"Invalid value for parameter {parameter!r}: must match {pattern.pattern}"
         )
     return normalized
 
@@ -93,17 +92,9 @@ def _resolve_target(
 def _resolve_region(region: str | None, session: Session) -> str:
     """Fall back to a configured region when one was not passed explicitly.
 
-    The session fallback is read from the same session that vends the credentials, so
-    the region and the credentials come from the same place — mixing a region from one
-    profile with credentials from another yields a token the server rejects
-    (``WRONGPASS``) with nothing to indicate the region was the cause.
-
+    The session fallback is read from the same session that vends the credentials
     ``AWS_REGION`` is consulted directly because botocore does not: its region only
-    resolves from ``AWS_DEFAULT_REGION`` or the config profile. The ``aws`` CLI and
-    the JS, Go, and Java SDKs all honour ``AWS_REGION`` and give it priority, so
-    without this a user whose region is set only there has a working ``aws`` CLI and
-    an inexplicably failing toolkit. Checked ahead of the session for the same reason
-    botocore ranks the environment above the config file.
+    resolves from ``AWS_DEFAULT_REGION`` or the config profile.
     """
     resolved = (
         region or os.environ.get(_REGION_ENV_VAR) or session.get_config_variable("region")

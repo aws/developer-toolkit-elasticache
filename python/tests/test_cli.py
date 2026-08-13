@@ -96,7 +96,7 @@ def test_expected_error_is_a_message_not_a_traceback(capsys, monkeypatch):
 
     def _raise(**_kwargs):
         raise InvalidParameterError(
-            "Invalid value ('bad name') for parameter 'serverless_cache_name': nope"
+            "Invalid value for parameter 'serverless_cache_name': must match <pattern>"
         )
 
     monkeypatch.setattr(cli, "generate_iam_auth_token", _raise)
@@ -105,7 +105,7 @@ def test_expected_error_is_a_message_not_a_traceback(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("Error: ")
-    assert "bad name" in captured.err
+    assert "serverless_cache_name" in captured.err
 
 
 def test_unexpected_error_propagates(monkeypatch):

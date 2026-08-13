@@ -1,83 +1,120 @@
 # Developer Toolkit for Amazon ElastiCache (Python)
 
-Developer tools for working with Amazon ElastiCache, as a Python library and
-CLI. 
+This is a developer toolkit for working with Amazon ElastiCache, as a Python library and
+CLI.
+It provides a function to generate an [IAM authentication token](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html) that Amazon ElastiCache requires as the
+connection password for an IAM-enabled user. 
 
-Install from source:
+## Installation
+
+Requires Python 3.10–3.14, `pip`, and `git`. Install from the source repository:
 
 ```bash
-python3 -m pip install -e ".[dev]"
+git clone https://github.com/aws/developer-toolkit-elasticache.git
+cd developer-toolkit-elasticache/python
+python3 -m pip install .
 ```
 
-This also registers the `developer-toolkit-elasticache` CLI.
+This installs the library and the `developer-toolkit-elasticache` command.
 
-## Tools
+## Usage
 
-### IAM authentication tokens
+To generate a usable token you need:
 
-IAM authentication for ElastiCache requires presenting a short-lived
-SigV4-signed token (valid for 15 minutes) as the connection password. This tool
-handles the signing, eliminating the boilerplate and the several non-obvious
-details that otherwise surface as an opaque `WRONGPASS` at connect time:
+- An Amazon ElastiCache serverless cache or replication group with the following:
+  - Valkey 7.2 and above or Redis OSS 7.0 and above
+  - In-transit Encryption (TLS) enabled
+  - IAM-enabled user that has access to to the cache.
+- AWS credentials on the default credential chain (environment variables, shared
+  config files, or an instance/container role), for an identity with the
+  `elasticache:Connect` permission to the cache.
 
-- The token is signed against the **cache name** (or replication group id), not
-  the connection endpoint DNS.
-- Serverless caches sign `ResourceType=ServerlessCache`; node-based replication
-  groups omit it. The resource type is part of the signature, so it cannot be
-  corrected after the fact.
-- Cache names are lowercased at creation time, so they must be signed in
-  lowercase.
-
-A fresh token is signed on demand each time one is requested, so there is no
-background refresh thread to manage and no stale-token window. Credentials are
-re-read from the default AWS credential chain on every call, so rotated
-credentials are picked up automatically.
+### Generate a token
 
 ```python
 from developer_toolkit_elasticache import generate_iam_auth_token
 
 token = generate_iam_auth_token(
-    serverless_cache_name="my-cache",
+    serverless_cache_name="my-cache",  # or replication_group_id="my-group"
     user_id="iam-user",
+    region="us-east-1",
 )
 ```
+Use the returned token as the password when connecting to the cache.
 
-For a node-based cluster, pass `replication_group_id` instead of
-`serverless_cache_name`.
+**Arguments**
 
-`region` is optional: it defaults to the region your AWS configuration resolves —
-`AWS_REGION`, `AWS_DEFAULT_REGION`, or the `region` setting in your config profile,
-in that order — and only needs to be passed to sign for a different region.
+- `serverless_cache_name` or `replication_group_id` (string) [one required]
+The serverless cache or node-based replication group to sign for. 
+- `user_id` (string) [required]
+The IAM-enabled user to authenticate as.
+- `region` (string) [optional]
+The AWS region. Defaults to your AWS configuration (`AWS_REGION`,
+`AWS_DEFAULT_REGION`, or the `region` in your profile, in that order).
 
-For clients that re-authenticate on reconnect (redis-py, valkey-py), use
-`ElastiCacheIAMAuthTokenProvider` and let the client call `get_token()` when it opens a
-connection. See the [`examples/`](examples/) directory.
+**Credentials**
 
-From the CLI:
+Credentials are resolved through the standard AWS credential provider chain
+and are re-read on every call, so rotated credentials are picked up for every new token generation.
+The chain is checked in this order:
+
+1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+   `AWS_SESSION_TOKEN`).
+2. The shared credentials and config files (`~/.aws/credentials`, `~/.aws/config`),
+   selected by `AWS_PROFILE`, including any assume-role or SSO configuration.
+3. Container credentials (Amazon ECS / EKS).
+4. EC2 instance profile credentials (IMDS).
+
+### Reconnecting clients
+
+Clients such as redis-py and valkey-py request credentials on every reconnection.
+Pass them an `ElastiCacheIAMAuthTokenProvider` and call `get_token()` when the
+connection opens, so each connection uses a fresh token:
+
+```python
+from developer_toolkit_elasticache import ElastiCacheIAMAuthTokenProvider
+
+auth = ElastiCacheIAMAuthTokenProvider(
+    serverless_cache_name="my-cache",
+    user_id="iam-user",
+    region="us-east-1",
+)
+username, password = auth.user_id, auth.get_token()
+```
+
+The [`examples/`](examples/) directory has redis-py and valkey-py integrations.
+
+### Command line
 
 ```bash
 developer-toolkit-elasticache generate_iam_auth_token \
-  --serverless-cache-name my-cache --user-id iam-user
+  --serverless-cache-name my-cache \
+  --user-id iam-user \
+  --region us-east-1
 ```
 
-The token is a bearer credential. Pass it via the client's password parameter or
-`VALKEYCLI_AUTH` / `REDISCLI_AUTH`.
+Add `--region` to sign for a specific region instead of the one resolved from your
+AWS configuration
 
-## Development
+For the command line, the token is written to stdout, so you can capture it
+directly and pass it to a CLI client through an auth environment variable.
+`REDISCLI_AUTH` works with both `redis-cli` and `valkey-cli`; `VALKEYCLI_AUTH`
+works with `valkey-cli` 9.0.0 and later:
 
 ```bash
-python -m pip install -e ".[dev]"   # install with test + lint dependencies
-python -m pytest -q                 # run the tests
-python -m ruff check .              # lint
-python -m ruff format .             # format
+export VALKEYCLI_AUTH=$(developer-toolkit-elasticache generate_iam_auth_token \
+  --serverless-cache-name my-cache --user-id iam-user --region us-east-1)
+
+# Example: connecting via valkey-cli
+valkey-cli --tls -h <my-cache-configured-endpoint> --user <iam-user>
 ```
 
-The test suite injects credentials into every signing call, so it never reads the
-AWS credential chain and needs no AWS account to run.
+## Security
 
-## Status
-
-Proof of concept
+The token is a bearer credential. Keep it out of logs and shell history, and
+connect over TLS. When using a CLI client, you can use the `REDISCLI_AUTH` /
+`VALKEYCLI_AUTH` environment variable to pass the token more safely than the
+`-a` / `--pass` flags, which expose it in the process list.
 
 ## License
 
