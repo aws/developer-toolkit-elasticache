@@ -1,0 +1,8 @@
+# OS / editor cruft that could appear anywhere in the tree.
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# Language-specific ignores live in python/.gitignore and java/.gitignore so
+# each package stays self-contained.
