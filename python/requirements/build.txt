@@ -1,0 +1,4 @@
+# Build and packaging tools pinned for reproducible releases.
+# Dependabot keeps these current via .github/dependabot.yml.
+build==1.5.0
+twine==7.0.0

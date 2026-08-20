@@ -12,11 +12,21 @@ updates:
       actions:
         patterns: ["*"]
 
-  # Python deps in python/pyproject.toml.
+  # Python runtime/dev deps in python/pyproject.toml.
   - package-ecosystem: pip
     directory: /python
     schedule:
       interval: weekly
     groups:
       python:
+        patterns: ["*"]
+
+  # Pinned build tooling (build, twine) in python/requirements/build.txt.
+  # Dependabot discovers *.txt files in this directory.
+  - package-ecosystem: pip
+    directory: /python/requirements
+    schedule:
+      interval: weekly
+    groups:
+      build-tools:
         patterns: ["*"]
