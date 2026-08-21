@@ -21,12 +21,12 @@ updates:
       python:
         patterns: ["*"]
 
-  # Pinned build tooling (build, twine) in python/requirements/build.txt.
-  # Dependabot discovers *.txt files in this directory.
+  # Pinned dev/build/publish tooling in python/requirements/dev.txt (ruff, pytest,
+  # build, twine). Dependabot discovers the *.txt files in this directory.
   - package-ecosystem: pip
     directory: /python/requirements
     schedule:
       interval: weekly
     groups:
-      build-tools:
+      tooling:
         patterns: ["*"]

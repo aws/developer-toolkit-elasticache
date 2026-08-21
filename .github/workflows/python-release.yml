@@ -16,23 +16,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Load supported Python versions from the shared JSON file.
+  # Source of truth for the test matrix: generated from [tool.python-support].
+  # python-v* tags only — test/build/publish inherit this via `needs`.
   versions:
-    name: load python versions
+    name: python versions
     if: startsWith(github.ref_name, 'python-v')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
+      data: ${{ steps.set.outputs.data }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - id: set
-        run: bash python/scripts/load_python_versions.sh
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Generate supported versions from pyproject.toml
+        id: set
+        run: echo "data=$(python python/dev.py versions)" >> "$GITHUB_OUTPUT"
 
   # Full support matrix gates the release; build/publish depend on it.
   # Re-runs the ubuntu CI tests here as one of the release gates.
-  # python-v* tags only
   test:
     name: test (py${{ matrix.python-version }})
     needs: versions
@@ -41,10 +48,7 @@ jobs:
     strategy:
       fail-fast: false  # report every version, not just the first failure
       matrix:
-        python-version: ${{ fromJson(needs.versions.outputs.matrix) }}
-    defaults:
-      run:
-        working-directory: python
+        python-version: ${{ fromJson(needs.versions.outputs.data).all }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,7 +60,7 @@ jobs:
 
       - name: Install and run the test suite
         timeout-minutes: 10
-        run: bash scripts/test.sh
+        run: python python/dev.py test
 
   build:
     name: build and verify
@@ -64,9 +68,6 @@ jobs:
     if: startsWith(github.ref_name, 'python-v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: python
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,11 +80,11 @@ jobs:
       # Tag must match pyproject.toml version, and the publish guard `Private :: Do Not Upload`
       # must be gone.
       - name: Verify the tag matches the packaged version and the package is publishable
-        run: bash scripts/verify_release.sh
+        run: python python/dev.py verify "$GITHUB_REF_NAME"
 
       - name: Build wheel and sdist, check metadata
         timeout-minutes: 5
-        run: bash scripts/build.sh
+        run: python python/dev.py build
 
       - name: Save built distributions for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -110,6 +111,11 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Retrieve built distributions from the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -121,7 +127,5 @@ jobs:
         with:
           attestations: true
 
-      # Prove the uploaded artifact installs and runs from PyPI. Retry: the index
-      # can lag the upload.
       - name: Smoke-test the published package
-        run: bash python/scripts/smoke_test.sh
+        run: python python/dev.py smoke "${GITHUB_REF_NAME#python-v}"

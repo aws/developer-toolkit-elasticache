@@ -8,16 +8,10 @@ on:
     paths:
       - "python/**"
       - ".github/workflows/python.yml"
-      - ".github/python-versions.json"
   pull_request:
     paths:
       - "python/**"
       - ".github/workflows/python.yml"
-      - ".github/python-versions.json"
-
-defaults:
-  run:
-    working-directory: python
 
 jobs:
   lint:
@@ -33,21 +27,26 @@ jobs:
           python-version: "3.12"
 
       - name: Lint and format check
-        run: bash scripts/lint.sh
+        run: python python/dev.py lint
 
-  # Load supported Python versions from the shared JSON file.
+  # Load Python versions generated from [tool.python-support].
   versions:
-    name: load python versions
+    name: python versions
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
+      data: ${{ steps.set.outputs.data }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - id: set
-        working-directory: ${{ github.workspace }}
-        run: bash python/scripts/load_python_versions.sh
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Generate supported versions from pyproject.toml
+        id: set
+        run: echo "data=$(python python/dev.py versions)" >> "$GITHUB_OUTPUT"
 
   test:
     name: py${{ matrix.python-version }} on ${{ matrix.os }}
@@ -60,16 +59,16 @@ jobs:
         # the other platforms test the ends of the range, which is where
         # interpreter differences show up.
         os: [ubuntu-latest]
-        python-version: ${{ fromJson(needs.versions.outputs.matrix) }}
+        python-version: ${{ fromJson(needs.versions.outputs.data).all }}
         include:
           - os: windows-latest
-            python-version: "3.10"
+            python-version: "${{ fromJson(needs.versions.outputs.data).min }}"
           - os: windows-latest
-            python-version: "3.14"
+            python-version: "${{ fromJson(needs.versions.outputs.data).max }}"
           - os: macos-14
-            python-version: "3.10"
+            python-version: "${{ fromJson(needs.versions.outputs.data).min }}"
           - os: macos-14
-            python-version: "3.14"
+            python-version: "${{ fromJson(needs.versions.outputs.data).max }}"
 
     steps:
       - name: Check out the repository
@@ -81,4 +80,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install and run tests
-        run: bash scripts/test.sh
+        run: python python/dev.py test
