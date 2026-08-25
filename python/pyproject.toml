@@ -71,11 +71,6 @@ extend-select = [
 # The examples are illustrative scripts whose job is to print, and they are not an
 # importable package.
 "examples/**/*" = ["T201", "INP001"]
-# dev.py is the task runner (not shipped code), so exempt the rules that fight its job:
-#   T201    — it prints command output and ::error:: annotations
-#   S603    — it shells out to the build tools (subprocess) with fixed, trusted args
-#   PLC0415 — it imports tomllib lazily so lint/test/build still run on Python 3.10
-"dev.py" = ["T201", "S603", "PLC0415"]
 
 [tool.pytest.ini_options]
 # The examples/ scripts are runnable demos that need live AWS credentials and a

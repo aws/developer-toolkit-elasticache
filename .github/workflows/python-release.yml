@@ -36,10 +36,10 @@ jobs:
 
       - name: Generate supported versions from pyproject.toml
         id: set
-        run: echo "data=$(python python/dev.py versions)" >> "$GITHUB_OUTPUT"
+        run: echo "data=$(python scripts/python_dev.py list-supported-versions)" >> "$GITHUB_OUTPUT"
 
-  # Full support matrix gates the release; build/publish depend on it.
-  # Re-runs the ubuntu CI tests here as one of the release gates.
+  # Full support matrix gates the release; build/publish depend on it. Sanity check with
+  # Ubuntu-only tests since package is pure-Python.
   test:
     name: test (py${{ matrix.python-version }})
     needs: versions
@@ -60,7 +60,7 @@ jobs:
 
       - name: Install and run the test suite
         timeout-minutes: 10
-        run: python python/dev.py test
+        run: python scripts/python_dev.py test
 
   build:
     name: build and verify
@@ -80,11 +80,11 @@ jobs:
       # Tag must match pyproject.toml version, and the publish guard `Private :: Do Not Upload`
       # must be gone.
       - name: Verify the tag matches the packaged version and the package is publishable
-        run: python python/dev.py verify "$GITHUB_REF_NAME"
+        run: python scripts/python_dev.py verify "$GITHUB_REF_NAME"
 
       - name: Build wheel and sdist, check metadata
         timeout-minutes: 5
-        run: python python/dev.py build
+        run: python scripts/python_dev.py package
 
       - name: Save built distributions for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -128,4 +128,4 @@ jobs:
           attestations: true
 
       - name: Smoke-test the published package
-        run: python python/dev.py smoke "${GITHUB_REF_NAME#python-v}"
+        run: python scripts/python_dev.py smoke "${GITHUB_REF_NAME#python-v}"

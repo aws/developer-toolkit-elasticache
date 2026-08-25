@@ -7,10 +7,12 @@ on:
     branches: [main]
     paths:
       - "python/**"
+      - "scripts/**"
       - ".github/workflows/python.yml"
   pull_request:
     paths:
       - "python/**"
+      - "scripts/**"
       - ".github/workflows/python.yml"
 
 jobs:
@@ -27,7 +29,7 @@ jobs:
           python-version: "3.12"
 
       - name: Lint and format check
-        run: python python/dev.py lint
+        run: python scripts/python_dev.py lint
 
   # Load Python versions generated from [tool.python-support].
   versions:
@@ -46,7 +48,7 @@ jobs:
 
       - name: Generate supported versions from pyproject.toml
         id: set
-        run: echo "data=$(python python/dev.py versions)" >> "$GITHUB_OUTPUT"
+        run: echo "data=$(python scripts/python_dev.py list-supported-versions)" >> "$GITHUB_OUTPUT"
 
   test:
     name: py${{ matrix.python-version }} on ${{ matrix.os }}
@@ -80,4 +82,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install and run tests
-        run: python python/dev.py test
+        run: python scripts/python_dev.py test
