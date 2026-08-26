@@ -1,0 +1,32 @@
+# Keeps pinned dependencies current. Takes effect only on the default branch.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # GitHub Actions: bumps the SHA pins and their `# vX.Y.Z` comments in workflows.
+  # Grouped into one PR to avoid five separate bumps.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Python runtime/dev deps in python/pyproject.toml.
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Pinned dev/build/publish tooling in python/requirements/dev.txt (ruff, pytest,
+  # build, twine). Dependabot discovers the *.txt files in this directory.
+  - package-ecosystem: pip
+    directory: /python/requirements
+    schedule:
+      interval: weekly
+    groups:
+      tooling:
+        patterns: ["*"]

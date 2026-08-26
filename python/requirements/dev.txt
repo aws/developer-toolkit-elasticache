@@ -1,0 +1,17 @@
+# Dev/CI tooling, pinned so CI is reproducible and a new release of any of these
+# can't silently break an unrelated PR. Dependabot bumps them (pip entry in
+# dependabot.yml). Installed by scripts/python_dev.py setup.
+# Requires Python 3.11+
+
+# install
+pip==26.2.1
+
+# build
+build==1.5.0
+
+# dev
+ruff==0.16.3
+pytest==9.1.1
+
+# publish
+twine==7.0.0

@@ -33,11 +33,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "ruff>=0.6",
-]
+# Supported Python range — the source for the CI/release test matrices.
+[tool.python-support]
+min = "3.10"
+max = "3.14"
 
 [tool.ruff]
 # The floor in requires-python. Keeps ruff from suggesting syntax that would not
