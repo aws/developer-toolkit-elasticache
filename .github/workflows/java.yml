@@ -1,0 +1,47 @@
+name: Java CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "java/**"
+      - ".github/workflows/java.yml"
+  pull_request:
+    paths:
+      - "java/**"
+      - ".github/workflows/java.yml"
+
+jobs:
+  test:
+    name: Java ${{ matrix.java-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        java-version: ["8", "11", "17", "21"]
+        include:
+          - os: windows-latest
+            java-version: "8"
+          - os: windows-latest
+            java-version: "21"
+          - os: macos-14
+            java-version: "8"
+          - os: macos-14
+            java-version: "21"
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java ${{ matrix.java-version }}
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: corretto
+          java-version: ${{ matrix.java-version }}
+          cache: maven
+          cache-dependency-path: java/pom.xml
+
+      - name: Build and test
+        working-directory: java
+        run: mvn --batch-mode --no-transfer-progress verify

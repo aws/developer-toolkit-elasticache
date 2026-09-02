@@ -39,3 +39,12 @@ updates:
     groups:
       node:
         patterns: ["*"]
+
+  # Java runtime and test dependencies in java/pom.xml.
+  - package-ecosystem: maven
+    directory: /java
+    schedule:
+      interval: weekly
+    groups:
+      java:
+        patterns: ["*"]
