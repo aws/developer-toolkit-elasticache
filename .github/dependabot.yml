@@ -30,3 +30,12 @@ updates:
     groups:
       tooling:
         patterns: ["*"]
+
+  # Node runtime/dev dependencies in node/package.json.
+  - package-ecosystem: npm
+    directory: /node
+    schedule:
+      interval: weekly
+    groups:
+      node:
+        patterns: ["*"]

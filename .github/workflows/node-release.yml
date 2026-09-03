@@ -1,0 +1,181 @@
+name: Publish Node package to npm
+
+# The npm trusted publisher must reference this exact workflow filename and the
+# `npm` environment, or OIDC publishing is rejected.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Cancelling during a publish can leave a release partially processed.
+concurrency:
+  group: node-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: test (Node ${{ matrix.node-version }})
+    if: startsWith(github.ref_name, 'node-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22.x", "24.x"]
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate, test, and build
+        run: |
+          npm run lint
+          npm run format:check
+          npm run typecheck
+          npm test
+          npm run build
+          npm pack --dry-run
+
+  build:
+    name: build and verify
+    needs: test
+    if: startsWith(github.ref_name, 'node-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24.x"
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag, version, and publication guard
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const tag = process.env.RELEASE_TAG;
+          const expected = `node-v${packageJson.version}`;
+          if (tag !== expected) {
+            console.error(`Release tag must be ${expected}, received ${tag}.`);
+            process.exit(1);
+          }
+          if (packageJson.private === true) {
+            console.error("The npm package is still marked private; publication is disabled.");
+            process.exit(1);
+          }
+          console.log(`Publishing version ${packageJson.version}.`);
+          NODE
+
+      - name: Build package
+        run: npm run build
+
+      - name: Validate and archive package
+        run: |
+          rm -rf release-artifacts
+          mkdir -p release-artifacts
+          npm pack --dry-run
+          npm pack --pack-destination release-artifacts
+
+      - name: Save package artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-package
+          path: node/release-artifacts/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    if: startsWith(github.ref_name, 'node-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24.x"
+          registry-url: https://registry.npmjs.org
+
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install --global npm@11.5.1
+          node --version
+          npm --version
+
+      - name: Retrieve package artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: node-package
+          path: node/release-artifacts
+
+      - name: Publish to npm with provenance
+        working-directory: node
+        run: npm publish release-artifacts/*.tgz --access public --provenance
+
+      - name: Smoke-test the published package
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_VERSION#node-v}"
+          tmp="$(mktemp -d)"
+          for attempt in 1 2 3 4 5; do
+            if npm install --prefix "$tmp" --no-save "@aws/developer-toolkit-elasticache@${version}"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Could not install the published package after 5 attempts."
+              exit 1
+            fi
+            echo "Install attempt ${attempt} failed; waiting for registry propagation."
+            sleep 15
+          done
+          cd "$tmp"
+          node --input-type=module <<'NODE'
+          const packageName = "@aws/developer-toolkit-elasticache";
+          const packageModule = await import(packageName);
+          for (const name of [
+            "ConfigurationError",
+            "ElastiCacheIAMAuthTokenProvider",
+            "InvalidParameterError",
+            "ToolkitInputError",
+            "generateIamAuthToken",
+          ]) {
+            if (!(name in packageModule)) {
+              throw new Error(`Published package is missing export ${name}.`);
+            }
+          }
+          NODE

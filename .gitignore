@@ -4,5 +4,5 @@
 *.iml
 .vscode/
 
-# Language-specific ignores live in python/.gitignore and java/.gitignore so
+# Language-specific ignores live in python/.gitignore and node/.gitignore so
 # each package stays self-contained.
