@@ -8,6 +8,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
@@ -35,6 +36,7 @@ import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 public final class ElastiCacheIamAuthTokenProvider {
     private static final String URL_SCHEME_PREFIX = "https://";
     private static final String SERVICE_NAME = "elasticache";
+    private static final String AWS_DEFAULT_REGION_ENV_VAR = "AWS_DEFAULT_REGION";
     private static final Duration TOKEN_TTL = Duration.ofSeconds(900);
     private static final Pattern CACHE_NAME_PATTERN =
             Pattern.compile("^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$");
@@ -42,7 +44,8 @@ public final class ElastiCacheIamAuthTokenProvider {
             Pattern.compile("^(?:default\\.)?[a-zA-Z][a-zA-Z0-9\\-]*$");
     private static final String NO_REGION_MESSAGE =
             "No AWS region found. Pass region explicitly, or configure one via "
-                    + "AWS_REGION, AWS_DEFAULT_REGION, or the region setting in your AWS config profile.";
+                    + "the aws.region system property, AWS_REGION, AWS_DEFAULT_REGION, "
+                    + "the region setting in your AWS config profile, or instance metadata.";
     private static final String NO_CREDENTIALS_MESSAGE =
             "No AWS credentials found. Configure credentials via the environment, "
                     + "shared config/credentials files, or an instance/container role.";
@@ -59,7 +62,8 @@ public final class ElastiCacheIamAuthTokenProvider {
         this.cacheName = target.cacheName;
         this.serverless = target.serverless;
         this.userId = validateAndNormalize("user_id", builder.userId, USER_ID_PATTERN);
-        this.region = resolveRegion(builder.region, builder.regionProvider);
+        this.region = resolveRegion(
+                builder.region, builder.regionProvider, builder.awsDefaultRegionProvider);
         this.credentialsProvider = builder.credentialsProvider == null
                 ? DefaultCredentialsProvider.builder().build()
                 : builder.credentialsProvider;
@@ -150,22 +154,38 @@ public final class ElastiCacheIamAuthTokenProvider {
                 false);
     }
 
-    private static Region resolveRegion(Region explicitRegion, AwsRegionProvider regionProvider) {
+    private static Region resolveRegion(
+            Region explicitRegion,
+            AwsRegionProvider regionProvider,
+            Supplier<String> awsDefaultRegionProvider) {
         if (explicitRegion != null) {
             return explicitRegion;
         }
         AwsRegionProvider provider = regionProvider == null
                 ? DefaultAwsRegionProviderChain.builder().build()
                 : regionProvider;
+        SdkClientException providerFailure = null;
         try {
             Region resolved = provider.getRegion();
-            if (resolved == null || !hasText(resolved.id())) {
-                throw new ConfigurationException(NO_REGION_MESSAGE);
+            if (resolved != null && hasText(resolved.id())) {
+                return resolved;
             }
-            return resolved;
         } catch (SdkClientException exception) {
-            throw new ConfigurationException(NO_REGION_MESSAGE, exception);
+            providerFailure = exception;
         }
+
+        Supplier<String> fallbackProvider = awsDefaultRegionProvider == null
+                ? () -> System.getenv(AWS_DEFAULT_REGION_ENV_VAR)
+                : awsDefaultRegionProvider;
+        String fallbackRegion = fallbackProvider.get();
+        if (hasText(fallbackRegion)) {
+            return Region.of(fallbackRegion);
+        }
+
+        if (providerFailure != null) {
+            throw new ConfigurationException(NO_REGION_MESSAGE, providerFailure);
+        }
+        throw new ConfigurationException(NO_REGION_MESSAGE);
     }
 
     private static String validateAndNormalize(
@@ -203,6 +223,7 @@ public final class ElastiCacheIamAuthTokenProvider {
         private String replicationGroupId;
         private AwsCredentialsProvider credentialsProvider;
         private AwsRegionProvider regionProvider;
+        private Supplier<String> awsDefaultRegionProvider;
         private AwsV4HttpSigner signer;
 
         private Builder() {}
@@ -219,7 +240,8 @@ public final class ElastiCacheIamAuthTokenProvider {
         }
 
         /**
-         * Sets the signing region. When omitted, the standard AWS region provider chain is used.
+         * Sets the signing region. When omitted, the standard AWS region provider chain is used,
+         * followed by an {@code AWS_DEFAULT_REGION} compatibility fallback.
          *
          * @param region AWS region
          * @return this builder
@@ -265,6 +287,12 @@ public final class ElastiCacheIamAuthTokenProvider {
 
         Builder regionProvider(AwsRegionProvider regionProvider) {
             this.regionProvider = Objects.requireNonNull(regionProvider, "regionProvider");
+            return this;
+        }
+
+        Builder awsDefaultRegionProvider(Supplier<String> awsDefaultRegionProvider) {
+            this.awsDefaultRegionProvider = Objects.requireNonNull(
+                    awsDefaultRegionProvider, "awsDefaultRegionProvider");
             return this;
         }
 

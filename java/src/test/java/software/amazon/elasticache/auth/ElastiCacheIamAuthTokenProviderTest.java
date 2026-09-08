@@ -84,6 +84,34 @@ class ElastiCacheIamAuthTokenProviderTest {
     }
 
     @Test
+    void awsDefaultRegionIsUsedWhenTheSdkRegionChainFails() {
+        ElastiCacheIamAuthTokenProvider provider = providerBuilder()
+                .serverlessCacheName(CACHE)
+                .region(null)
+                .regionProvider(() -> {
+                    throw SdkClientException.create("missing");
+                })
+                .awsDefaultRegionProvider(() -> "ap-southeast-2")
+                .build();
+
+        assertTrue(provider.getToken().contains("%2Fap-southeast-2%2F"));
+    }
+
+    @Test
+    void sdkRegionChainWinsOverAwsDefaultRegion() {
+        ElastiCacheIamAuthTokenProvider provider = providerBuilder()
+                .serverlessCacheName(CACHE)
+                .region(null)
+                .regionProvider(() -> Region.EU_WEST_1)
+                .awsDefaultRegionProvider(() -> "ap-southeast-2")
+                .build();
+
+        String token = provider.getToken();
+        assertTrue(token.contains("%2Feu-west-1%2F"));
+        assertFalse(token.contains("ap-southeast-2"));
+    }
+
+    @Test
     void missingRegionFailsAtConstruction() {
         ConfigurationException exception = assertThrows(
                 ConfigurationException.class,
@@ -93,8 +121,10 @@ class ElastiCacheIamAuthTokenProviderTest {
                         .regionProvider(() -> {
                             throw SdkClientException.create("missing");
                         })
+                        .awsDefaultRegionProvider(() -> null)
                         .build());
 
+        assertTrue(exception.getMessage().contains("aws.region"));
         assertTrue(exception.getMessage().contains("AWS_REGION"));
         assertTrue(exception.getMessage().contains("AWS_DEFAULT_REGION"));
     }

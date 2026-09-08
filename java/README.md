@@ -50,8 +50,10 @@ Use `username` and `password` when opening the Redis or Valkey connection. Call
 `getToken()` again for each reconnect; tokens are valid for 15 minutes and the
 provider reads fresh AWS credentials on every call.
 
-The region is optional. When omitted, the AWS SDK resolves it from `AWS_REGION`,
-`AWS_DEFAULT_REGION`, or the selected AWS config profile.
+The region is optional. When omitted, the standard AWS SDK region provider chain
+checks the `aws.region` system property, `AWS_REGION`, the selected AWS config
+profile, and instance metadata. If that chain does not resolve a region, the
+toolkit also checks `AWS_DEFAULT_REGION` for parity with the Python library.
 
 Credentials use the AWS SDK default provider chain, including environment
 variables, shared credentials/config files, container credentials, and EC2 instance
