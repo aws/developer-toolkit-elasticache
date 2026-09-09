@@ -218,6 +218,22 @@ class ElastiCacheIamAuthTokenProviderTest {
     }
 
     @Test
+    void invalidReplicationGroupIdNamesThatParameter() {
+        InvalidParameterException exception = assertThrows(
+                InvalidParameterException.class,
+                () -> providerBuilder().replicationGroupId("bad_name!").build());
+
+        assertTrue(exception.getMessage().contains("replication_group_id"));
+    }
+
+    @Test
+    void emptyCacheNameIsRejectedAsMissingTarget() {
+        assertThrows(
+                InvalidParameterException.class,
+                () -> providerBuilder().serverlessCacheName("").build());
+    }
+
+    @Test
     void parameterErrorsDoNotEchoHostileValues() {
         String hostile = "evil.com/inject\nlog-entry";
         InvalidParameterException exception = assertThrows(
