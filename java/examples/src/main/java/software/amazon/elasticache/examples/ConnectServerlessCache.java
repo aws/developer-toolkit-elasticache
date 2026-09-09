@@ -8,6 +8,7 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -57,6 +58,7 @@ public final class ConnectServerlessCache {
         try (SSLSocket socket = (SSLSocket) socketFactory.createSocket(endpoint, port);
                 BufferedInputStream input = new BufferedInputStream(socket.getInputStream());
                 OutputStream output = socket.getOutputStream()) {
+            enableHostnameVerification(socket);
             socket.startHandshake();
 
             writeCommand(output, "AUTH", auth.getUserId(), auth.getToken());
@@ -67,6 +69,12 @@ public final class ConnectServerlessCache {
         }
 
         System.out.println("IAM authentication succeeded; PING returned PONG.");
+    }
+
+    static void enableHostnameVerification(SSLSocket socket) {
+        SSLParameters sslParameters = socket.getSSLParameters();
+        sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
+        socket.setSSLParameters(sslParameters);
     }
 
     private static void writeCommand(OutputStream output, String... arguments) throws IOException {

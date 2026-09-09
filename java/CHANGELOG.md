@@ -22,4 +22,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java does not read `AWS_DEFAULT_REGION`.
 - A standalone Java example demonstrates TLS connection, IAM authentication, and
   `PING` against an ElastiCache serverless cache without adding a client-library
-  dependency to the toolkit.
+  dependency to the toolkit. The example verifies the endpoint hostname during
+  the TLS handshake.

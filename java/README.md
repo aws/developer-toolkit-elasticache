@@ -68,9 +68,10 @@ succeed, but ElastiCache will reject the token when the client connects.
 
 ## Connect to a serverless cache
 
-The standalone example in [`examples`](examples) opens a TLS connection, authenticates
-with a generated IAM token, and sends `PING`. It uses the Redis serialization protocol
-directly so the toolkit does not require a particular Redis or Valkey client.
+The standalone example in [`examples`](examples) opens a TLS connection with certificate
+and hostname verification, authenticates with a generated IAM token, and sends `PING`.
+It uses the Redis serialization protocol directly so the toolkit does not require a
+particular Redis or Valkey client.
 
 Install the toolkit into your local Maven repository, then run the example:
 
