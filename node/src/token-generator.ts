@@ -307,6 +307,11 @@ export async function generateIamAuthToken(
  * during construction. `getToken()` signs a fresh token and re-fetches credentials
  * on every call so rotated SSO, assume-role, container, or instance credentials are
  * used without changing the signing region.
+ *
+ * Region resolution is asynchronous, so a constructor cannot report a missing region.
+ * Prefer `ElastiCacheIAMAuthTokenProvider.create()`, which awaits that resolution and
+ * fails immediately; the constructor retains the error and reports it from the first
+ * `getToken()` call instead.
  */
 export class ElastiCacheIAMAuthTokenProvider {
   private readonly target: Target;
@@ -325,6 +330,27 @@ export class ElastiCacheIAMAuthTokenProvider {
       dependencies.credentialProvider ?? defaultCredentialProvider();
     this.regionResolution = retainRegion(options.region, dependencies.regionProvider);
     this.signingDate = dependencies.signingDate;
+  }
+
+  /**
+   * Create a provider, resolving the region before returning.
+   *
+   * Use this instead of `new` to surface a missing or unreadable region
+   * configuration up front rather than at the first connection attempt.
+   *
+   * @throws {InvalidParameterError} for an invalid target or user id.
+   * @throws {ConfigurationError} when no region can be resolved.
+   */
+  static async create(
+    options: TokenGeneratorOptions,
+    dependencies: TokenGeneratorDependencies = {},
+  ): Promise<ElastiCacheIAMAuthTokenProvider> {
+    const provider = new ElastiCacheIAMAuthTokenProvider(options, dependencies);
+    const regionResolution = await provider.regionResolution;
+    if ("error" in regionResolution) {
+      throw regionResolution.error;
+    }
+    return provider;
   }
 
   get userId(): string {

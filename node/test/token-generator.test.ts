@@ -162,16 +162,131 @@ test("rejects malformed cache names without echoing input", async () => {
   );
 });
 
-test("rejects malformed user ids", async () => {
+const INVALID_CACHE_NAMES = [
+  "evil.com/path", // slash / path injection into the signing host
+  "my-cache@evil.com", // userinfo host confusion
+  "my-cache/?X=1", // query injection into the host
+  "my cache", // whitespace
+  "my_cache", // underscore not allowed
+  "1-cache", // must start with a letter, not a digit
+  "-cache", // must start with a letter, not a hyphen
+  "cache-", // cannot end with a hyphen
+  "my--cache", // cannot contain two consecutive hyphens
+  "-", // a bare hyphen is neither
+];
+
+const VALID_CACHE_NAMES = [
+  "c", // a single letter is the shortest legal name
+  "my-cache",
+  "cache1",
+  "a-1-b-2", // hyphens between alphanumerics, repeatedly
+  "MyCache", // signed lowercase, but accepted as given
+];
+
+const INVALID_USER_IDS = [
+  "", // empty
+  "1user", // must start with a letter
+  "-user", // must start with a letter, not a hyphen
+  "user name", // whitespace
+  "user@host", // userinfo-style value
+  "user.name", // a dot is only allowed via the "default." prefix
+  "default.", // nothing after the prefix
+  "default.1x", // label after the prefix must start with a letter
+  "notdefault.foo", // the prefix must be literally "default."
+];
+
+const VALID_USER_IDS = [
+  "iam-user",
+  "myuser",
+  "default", // service-managed default user
+  "default.iam-user", // service-managed IAM user
+  "default.other", // any default.* is accepted
+  "DEFAULT.IAM-USER", // case-normalized before matching
+  "a-1-b-2",
+];
+
+for (const badName of INVALID_CACHE_NAMES) {
+  test(`rejects the malformed cache name ${JSON.stringify(badName)}`, async () => {
+    await assert.rejects(
+      () =>
+        generateIamAuthToken(
+          { serverlessCacheName: badName, userId: USER, region: REGION },
+          fixedDependencies(),
+        ),
+      (error: unknown) => {
+        assert.equal(error instanceof InvalidParameterError, true);
+        assert.equal((error as Error).message.includes("serverlessCacheName"), true);
+        return true;
+      },
+    );
+  });
+}
+
+for (const goodName of VALID_CACHE_NAMES) {
+  test(`accepts the cache name ${JSON.stringify(goodName)}`, async () => {
+    // Tightening the pattern must not reject names the service accepts.
+    const token = await generateIamAuthToken(
+      { serverlessCacheName: goodName, userId: USER, region: REGION },
+      fixedDependencies(),
+    );
+    assert.equal(token.startsWith(`${goodName.toLowerCase()}/`), true);
+  });
+}
+
+test("reports a bad replication group id under its own parameter name", async () => {
   await assert.rejects(
     () =>
       generateIamAuthToken(
-        { serverlessCacheName: CACHE, userId: "user.name", region: REGION },
+        { replicationGroupId: "bad_name!", userId: USER, region: REGION },
+        fixedDependencies(),
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof InvalidParameterError, true);
+      assert.equal((error as Error).message.includes("replicationGroupId"), true);
+      return true;
+    },
+  );
+});
+
+test("treats an empty cache name as a missing target", async () => {
+  // An empty name is indistinguishable from no name, so it fails earlier.
+  await assert.rejects(
+    () =>
+      generateIamAuthToken(
+        { serverlessCacheName: "", userId: USER, region: REGION },
         fixedDependencies(),
       ),
     InvalidParameterError,
   );
 });
+
+for (const badUserId of INVALID_USER_IDS) {
+  test(`rejects the malformed user id ${JSON.stringify(badUserId)}`, async () => {
+    await assert.rejects(
+      () =>
+        generateIamAuthToken(
+          { serverlessCacheName: CACHE, userId: badUserId, region: REGION },
+          fixedDependencies(),
+        ),
+      (error: unknown) => {
+        assert.equal(error instanceof InvalidParameterError, true);
+        assert.equal((error as Error).message.includes("userId"), true);
+        return true;
+      },
+    );
+  });
+}
+
+for (const goodUserId of VALID_USER_IDS) {
+  test(`accepts the user id ${JSON.stringify(goodUserId)}`, async () => {
+    // Case does not matter: the id is lowercased before both matching and signing.
+    const token = await generateIamAuthToken(
+      { serverlessCacheName: CACHE, userId: goodUserId, region: REGION },
+      fixedDependencies(),
+    );
+    assert.equal(token.includes(`User=${goodUserId.toLowerCase()}`), true);
+  });
+}
 
 test("configuration errors are toolkit errors but not parameter errors", async () => {
   assert.equal(ConfigurationError.prototype instanceof ToolkitInputError, true);
@@ -416,6 +531,53 @@ test("provider retains its construction-time region while credentials rotate", a
     assert.equal(first.includes("%2Feu-west-1%2F"), false);
     assert.equal(second.includes("%2Fus-east-1%2F"), true);
     assert.equal(second.includes("%2Fap-southeast-1%2F"), false);
+  });
+});
+
+test("create() fails immediately when no region is available", async () => {
+  // Parity with the Python provider, which fails during construction rather than
+  // at the first connection attempt.
+  await withoutRegion(async () => {
+    await assert.rejects(
+      () =>
+        ElastiCacheIAMAuthTokenProvider.create(
+          { serverlessCacheName: CACHE, userId: USER },
+          {
+            credentialProvider: async () => CREDENTIALS,
+            regionProvider: async () => undefined,
+          },
+        ),
+      (error: unknown) => {
+        assert.equal(error instanceof ConfigurationError, true);
+        assert.equal((error as Error).message.includes("AWS_REGION"), true);
+        return true;
+      },
+    );
+  });
+});
+
+test("create() validates its parameters before resolving the region", async () => {
+  await assert.rejects(
+    () =>
+      ElastiCacheIAMAuthTokenProvider.create(
+        { serverlessCacheName: "my_cache", userId: USER, region: REGION },
+        fixedDependencies(),
+      ),
+    InvalidParameterError,
+  );
+});
+
+test("create() returns a usable provider", async () => {
+  await withoutRegion(async () => {
+    const auth = await ElastiCacheIAMAuthTokenProvider.create(
+      { serverlessCacheName: CACHE, userId: USER },
+      fixedDependencies(CREDENTIALS, SESSION_REGION),
+    );
+
+    assert.equal(auth instanceof ElastiCacheIAMAuthTokenProvider, true);
+    assert.equal(auth.userId, USER);
+    const token = await auth.getToken();
+    assert.equal(token.includes("%2Feu-west-1%2F"), true);
   });
 });
 

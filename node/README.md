@@ -62,14 +62,16 @@ so refreshed configuration and credentials are used.
 `ElastiCacheIAMAuthTokenProvider` is client-agnostic. It resolves and retains the region
 once during construction, exposes the normalized `userId`, and asynchronously vends a
 fresh token each time `getToken()` is called. Credential providers are still invoked for
-every token, so refreshed credentials are used without changing the signing region. Since
-Node's region configuration is asynchronous, missing region configuration is reported by
-`getToken()` rather than the synchronous constructor:
+every token, so refreshed credentials are used without changing the signing region.
+
+Node's region configuration is asynchronous, so use the `create()` factory to surface a
+missing region up front. The synchronous constructor is also supported, but it retains the
+configuration error and reports it from the first `getToken()` call instead.
 
 ```typescript
 import { ElastiCacheIAMAuthTokenProvider } from "@aws/developer-toolkit-elasticache";
 
-const auth = new ElastiCacheIAMAuthTokenProvider({
+const auth = await ElastiCacheIAMAuthTokenProvider.create({
   serverlessCacheName: "my-cache",
   userId: "iam-user",
   region: "us-east-1",

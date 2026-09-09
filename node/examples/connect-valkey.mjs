@@ -25,7 +25,9 @@ const TOKEN_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 // rather than waiting for the next full 10-minute interval.
 const TOKEN_REFRESH_RETRY_MS = 30 * 1000;
 
-const auth = new ElastiCacheIAMAuthTokenProvider({
+// create() resolves the region up front, so a missing region fails here rather
+// than at the first token request.
+const auth = await ElastiCacheIAMAuthTokenProvider.create({
   serverlessCacheName: "my-cache",
   userId: "my-iam-user",
   region: "us-east-1",
