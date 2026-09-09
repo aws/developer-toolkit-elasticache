@@ -40,8 +40,14 @@ jobs:
           distribution: corretto
           java-version: ${{ matrix.java-version }}
           cache: maven
-          cache-dependency-path: java/pom.xml
+          cache-dependency-path: |
+            java/pom.xml
+            java/examples/pom.xml
 
       - name: Build and test
         working-directory: java
-        run: mvn --batch-mode --no-transfer-progress verify
+        run: mvn --batch-mode --no-transfer-progress install
+
+      - name: Compile standalone example
+        working-directory: java
+        run: mvn --batch-mode --no-transfer-progress --file examples/pom.xml verify

@@ -48,3 +48,12 @@ updates:
     groups:
       java:
         patterns: ["*"]
+
+  # Standalone Java example build plugins.
+  - package-ecosystem: maven
+    directory: /java/examples
+    schedule:
+      interval: weekly
+    groups:
+      java-examples:
+        patterns: ["*"]

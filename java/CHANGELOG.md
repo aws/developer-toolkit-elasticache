@@ -20,3 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Region resolution follows the Java contract: explicit region, then `AWS_REGION`,
   then the standard AWS SDK region provider chain. Unlike botocore, the AWS SDK for
   Java does not read `AWS_DEFAULT_REGION`.
+- A standalone Java example demonstrates TLS connection, IAM authentication, and
+  `PING` against an ElastiCache serverless cache without adding a client-library
+  dependency to the toolkit.

@@ -66,6 +66,24 @@ Missing credentials are reported when a token is requested. Expired or otherwise
 invalid credentials cannot be detected during local signing: token generation can
 succeed, but ElastiCache will reject the token when the client connects.
 
+## Connect to a serverless cache
+
+The standalone example in [`examples`](examples) opens a TLS connection, authenticates
+with a generated IAM token, and sends `PING`. It uses the Redis serialization protocol
+directly so the toolkit does not require a particular Redis or Valkey client.
+
+Install the toolkit into your local Maven repository, then run the example:
+
+```bash
+mvn install
+mvn --file examples/pom.xml compile exec:java \
+    -Dexec.args="<cache-name> <iam-user-id> <endpoint> <region>"
+```
+
+Applications should normally use their preferred client library and provide
+`auth.getUserId()` and a fresh `auth.getToken()` whenever the client authenticates
+or reconnects.
+
 ## Prerequisites
 
 The target cache must have TLS enabled and an IAM-enabled ElastiCache user. The
