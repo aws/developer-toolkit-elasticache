@@ -10,8 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +34,10 @@ class ElastiCacheIamAuthTokenProviderTest {
     private static final Region REGION = Region.US_EAST_1;
     private static final AwsCredentials CREDENTIALS = AwsSessionCredentials.create(
             "FRAIDA1FODNN7EXAMPLE", "secret", "token");
+    private static final Clock KNOWN_ANSWER_CLOCK =
+            Clock.fixed(Instant.parse("2025-01-01T00:00:00Z"), ZoneOffset.UTC);
+    private static final AwsCredentials KNOWN_ANSWER_CREDENTIALS = AwsBasicCredentials.create(
+            "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
 
     @Test
     void generatesServerlessToken() {
@@ -65,6 +74,7 @@ class ElastiCacheIamAuthTokenProviderTest {
         ElastiCacheIamAuthTokenProvider provider = providerBuilder()
                 .serverlessCacheName(CACHE)
                 .region(null)
+                .awsRegionEnvironmentProvider(() -> null)
                 .regionProvider(() -> Region.EU_WEST_1)
                 .build();
 
@@ -75,6 +85,7 @@ class ElastiCacheIamAuthTokenProviderTest {
     void explicitRegionWinsOverRegionProvider() {
         ElastiCacheIamAuthTokenProvider provider = providerBuilder()
                 .serverlessCacheName(CACHE)
+                .awsRegionEnvironmentProvider(() -> "ap-southeast-2")
                 .regionProvider(() -> Region.EU_WEST_1)
                 .build();
 
@@ -84,31 +95,30 @@ class ElastiCacheIamAuthTokenProviderTest {
     }
 
     @Test
-    void awsDefaultRegionIsUsedWhenTheSdkRegionChainFails() {
+    void awsRegionEnvironmentWinsOverSdkRegionChain() {
         ElastiCacheIamAuthTokenProvider provider = providerBuilder()
                 .serverlessCacheName(CACHE)
                 .region(null)
-                .regionProvider(() -> {
-                    throw SdkClientException.create("missing");
-                })
-                .awsDefaultRegionProvider(() -> "ap-southeast-2")
+                .awsRegionEnvironmentProvider(() -> "ap-southeast-2")
+                .regionProvider(() -> Region.EU_WEST_1)
                 .build();
 
-        assertTrue(provider.getToken().contains("%2Fap-southeast-2%2F"));
+        String token = provider.getToken();
+        assertTrue(token.contains("%2Fap-southeast-2%2F"));
+        assertFalse(token.contains("eu-west-1"));
     }
 
     @Test
-    void sdkRegionChainWinsOverAwsDefaultRegion() {
+    void sdkRegionChainIsUsedWhenAwsRegionIsAbsent() {
         ElastiCacheIamAuthTokenProvider provider = providerBuilder()
                 .serverlessCacheName(CACHE)
                 .region(null)
+                .awsRegionEnvironmentProvider(() -> null)
                 .regionProvider(() -> Region.EU_WEST_1)
-                .awsDefaultRegionProvider(() -> "ap-southeast-2")
                 .build();
 
         String token = provider.getToken();
         assertTrue(token.contains("%2Feu-west-1%2F"));
-        assertFalse(token.contains("ap-southeast-2"));
     }
 
     @Test
@@ -118,15 +128,14 @@ class ElastiCacheIamAuthTokenProviderTest {
                 () -> providerBuilder()
                         .serverlessCacheName(CACHE)
                         .region(null)
+                        .awsRegionEnvironmentProvider(() -> null)
                         .regionProvider(() -> {
                             throw SdkClientException.create("missing");
                         })
-                        .awsDefaultRegionProvider(() -> null)
                         .build());
 
-        assertTrue(exception.getMessage().contains("aws.region"));
         assertTrue(exception.getMessage().contains("AWS_REGION"));
-        assertTrue(exception.getMessage().contains("AWS_DEFAULT_REGION"));
+        assertTrue(exception.getMessage().contains("AWS SDK"));
     }
 
     @Test
@@ -257,11 +266,45 @@ class ElastiCacheIamAuthTokenProviderTest {
         assertFalse(InvalidParameterException.class.isAssignableFrom(ConfigurationException.class));
     }
 
+    @Test
+    void serverlessTokenMatchesKnownAnswer() {
+        String token = knownAnswerProviderBuilder()
+                .serverlessCacheName(CACHE)
+                .build()
+                .getToken();
+
+        assertKnownAnswerToken(
+                token,
+                true,
+                "28f349fd92f74e0192de149a74743ae7d087bb136523c342bdd67632a8360023");
+    }
+
+    @Test
+    void replicationGroupTokenMatchesKnownAnswer() {
+        String token = knownAnswerProviderBuilder()
+                .replicationGroupId(CACHE)
+                .build()
+                .getToken();
+
+        assertKnownAnswerToken(
+                token,
+                false,
+                "cd78a7de74c1bb1c8c685cac428f783b5433ce5fbf569af867570311d6a85797");
+    }
+
     private static ElastiCacheIamAuthTokenProvider.Builder providerBuilder() {
         return ElastiCacheIamAuthTokenProvider.builder()
                 .userId(USER)
                 .region(REGION)
                 .credentialsProvider(StaticCredentialsProvider.create(CREDENTIALS));
+    }
+
+    private static ElastiCacheIamAuthTokenProvider.Builder knownAnswerProviderBuilder() {
+        return ElastiCacheIamAuthTokenProvider.builder()
+                .userId(USER)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(KNOWN_ANSWER_CREDENTIALS))
+                .signingClock(KNOWN_ANSWER_CLOCK);
     }
 
     private static void assertValidToken(String token) {
@@ -273,5 +316,39 @@ class ElastiCacheIamAuthTokenProviderTest {
         assertTrue(token.contains("X-Amz-Signature"));
         assertTrue(token.contains("X-Amz-Expires=900"));
         assertFalse(token.startsWith("https://"));
+    }
+
+    private static void assertKnownAnswerToken(
+            String token, boolean serverless, String expectedSignature) {
+        assertTrue(token.startsWith(CACHE + "/?"));
+        Map<String, String> parameters = rawQueryParameters(token);
+        assertEquals("connect", parameters.get("Action"));
+        assertEquals(USER, parameters.get("User"));
+        assertEquals("AWS4-HMAC-SHA256", parameters.get("X-Amz-Algorithm"));
+        assertEquals(
+                "AKIAIOSFODNN7EXAMPLE%2F20250101%2Fus-east-1"
+                        + "%2Felasticache%2Faws4_request",
+                parameters.get("X-Amz-Credential"));
+        assertEquals("20250101T000000Z", parameters.get("X-Amz-Date"));
+        assertEquals("900", parameters.get("X-Amz-Expires"));
+        assertEquals("host", parameters.get("X-Amz-SignedHeaders"));
+        assertEquals(expectedSignature, parameters.get("X-Amz-Signature"));
+        if (serverless) {
+            assertEquals("ServerlessCache", parameters.get("ResourceType"));
+            assertEquals(9, parameters.size());
+        } else {
+            assertFalse(parameters.containsKey("ResourceType"));
+            assertEquals(8, parameters.size());
+        }
+    }
+
+    private static Map<String, String> rawQueryParameters(String token) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        String query = token.substring(token.indexOf('?') + 1);
+        for (String pair : query.split("&")) {
+            String[] parts = pair.split("=", 2);
+            parameters.put(parts[0], parts.length == 2 ? parts[1] : "");
+        }
+        return parameters;
     }
 }
