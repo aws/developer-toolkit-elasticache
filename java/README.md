@@ -53,6 +53,10 @@ provider reads fresh AWS credentials on every call.
 The region is optional. When omitted, the toolkit checks `AWS_REGION` first,
 then uses the standard AWS SDK region provider chain.
 
+The AWS SDK for Java does not read `AWS_DEFAULT_REGION`. If your environment
+uses that variable for Python or AWS CLI tooling, also set `AWS_REGION` or pass
+the region explicitly when using this Java package.
+
 Credentials use the AWS SDK default provider chain, including environment
 variables, shared credentials/config files, container credentials, and EC2 instance
 profile credentials. To use a specific provider, pass it with

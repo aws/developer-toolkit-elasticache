@@ -241,7 +241,8 @@ public final class ElastiCacheIamAuthTokenProvider {
 
         /**
          * Sets the signing region. When omitted, {@code AWS_REGION} is checked before the
-         * standard AWS SDK region provider chain.
+         * standard AWS SDK region provider chain. The AWS SDK for Java does not read
+         * {@code AWS_DEFAULT_REGION}.
          *
          * @param region AWS region
          * @return this builder
