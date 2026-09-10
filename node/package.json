@@ -27,6 +27,7 @@
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
     "clean": "node scripts/clean.mjs",
+    "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "package:check": "npm run clean && npm run build && npm pack --dry-run",

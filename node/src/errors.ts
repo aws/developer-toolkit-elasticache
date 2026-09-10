@@ -3,7 +3,7 @@
 
 /**
  * Base class for failures that can be corrected by changing the invocation or
- * the AWS configuration. 
+ * the AWS configuration.
  */
 export class ToolkitInputError extends Error {
   constructor(message: string) {
