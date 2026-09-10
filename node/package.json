@@ -23,11 +23,8 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "generate_iam_auth_token": "./dist/cli.js"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
+    "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
     "clean": "node scripts/clean.mjs",
     "format:check": "prettier --check .",

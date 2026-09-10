@@ -535,8 +535,7 @@ test("provider retains its construction-time region while credentials rotate", a
 });
 
 test("create() fails immediately when no region is available", async () => {
-  // Parity with the Python provider, which fails during construction rather than
-  // at the first connection attempt.
+  // Fails during construction rather than at the first connection attempt.
   await withoutRegion(async () => {
     await assert.rejects(
       () =>

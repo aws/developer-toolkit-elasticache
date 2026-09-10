@@ -1,8 +1,8 @@
 # Developer Toolkit for Amazon ElastiCache (Node.js)
 
 This package generates IAM authentication tokens for Amazon ElastiCache serverless caches
-and node-based replication groups. It provides a typed TypeScript API, an async token
-provider, and the `generate_iam_auth_token` command.
+and node-based replication groups. It provides a typed TypeScript API and an async token
+provider.
 
 ## Installation
 
@@ -45,7 +45,9 @@ ElastiCache cache name or replication group id used as the SigV4 signing host; i
 the connection endpoint DNS name. Cache names and user ids are normalized to lowercase
 before validation and signing.
 
-The `region` option is optional. Resolution uses the following order:
+The `region` option is optional when a region is available through the standard AWS
+configuration chain. If no region can be resolved, the operation throws
+`ConfigurationError`.
 
 1. The explicit `region` option.
 2. `AWS_REGION`.
@@ -103,29 +105,6 @@ npm install @valkey/valkey-glide
 node examples/connect-valkey.mjs
 ```
 
-### Command line
-
-The npm package installs the `generate_iam_auth_token` executable:
-
-```bash
-generate_iam_auth_token \
-  --serverless-cache-name my-cache \
-  --user-id iam-user \
-  --region us-east-1
-```
-
-The Python-compatible form with a leading command is also accepted:
-
-```bash
-generate_iam_auth_token generate_iam_auth_token \
-  --replication-group-id my-group \
-  --user-id iam-user
-```
-
-The token is the only successful stdout output, followed by a newline. Input and AWS
-configuration errors produce one `Error: ...` line on stderr and exit with status 1.
-Malformed command-line arguments exit with status 2.
-
 ## Errors
 
 The public error hierarchy is:
@@ -139,16 +118,8 @@ The public error hierarchy is:
 An IAM auth token is a short-lived bearer credential. Do not log, persist, or place it in
 shell history. Connect to ElastiCache over TLS. When using a command-line client, pass the
 token through `REDISCLI_AUTH` or `VALKEYCLI_AUTH` instead of a password argument that may
-appear in the process list:
-
-```bash
-export VALKEYCLI_AUTH=$(generate_iam_auth_token \
-  --serverless-cache-name my-cache \
-  --user-id iam-user \
-  --region us-east-1)
-valkey-cli --tls -h <configured-connection-endpoint> --user iam-user
-unset VALKEYCLI_AUTH
-```
+appear in the process list. Generate the token programmatically with
+`generateIamAuthToken()` and avoid logging or persisting it.
 
 ## Development
 
