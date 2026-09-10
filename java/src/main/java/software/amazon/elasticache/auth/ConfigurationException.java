@@ -18,14 +18,4 @@ public final class ConfigurationException extends ToolkitInputException {
     public ConfigurationException(String message) {
         super(message);
     }
-
-    /**
-     * Creates a configuration exception with its cause.
-     *
-     * @param message actionable error message
-     * @param cause underlying configuration failure
-     */
-    public ConfigurationException(String message, Throwable cause) {
-        super(message, cause);
-    }
 }

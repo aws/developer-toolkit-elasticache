@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -124,6 +126,7 @@ class ElastiCacheIamAuthTokenProviderTest {
 
     @Test
     void missingRegionFailsAtConstruction() {
+        String providerDetail = "secret region detail\nmust not escape";
         ConfigurationException exception = assertThrows(
                 ConfigurationException.class,
                 () -> providerBuilder()
@@ -131,12 +134,13 @@ class ElastiCacheIamAuthTokenProviderTest {
                         .region(null)
                         .awsRegionEnvironmentProvider(() -> null)
                         .regionProvider(() -> {
-                            throw SdkClientException.create("missing");
+                            throw SdkClientException.create(providerDetail);
                         })
                         .build());
 
         assertTrue(exception.getMessage().contains("AWS_REGION"));
         assertTrue(exception.getMessage().contains("AWS SDK"));
+        assertFalse(renderStackTrace(exception).contains(providerDetail));
     }
 
     @Test
@@ -258,7 +262,7 @@ class ElastiCacheIamAuthTokenProviderTest {
                 "No AWS credentials found. Configure credentials via the environment, "
                         + "shared config/credentials files, or an instance/container role.",
                 exception.getMessage());
-        assertFalse(exception.getMessage().contains(providerDetail));
+        assertFalse(renderStackTrace(exception).contains(providerDetail));
     }
 
     @Test
@@ -438,9 +442,16 @@ class ElastiCacheIamAuthTokenProviderTest {
         assertTrue(token.contains("User=" + USER));
         assertTrue(token.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
         assertTrue(token.contains("X-Amz-Credential"));
+        assertTrue(token.contains("X-Amz-Security-Token=token"));
         assertTrue(token.contains("X-Amz-Signature"));
         assertTrue(token.contains("X-Amz-Expires=900"));
         assertFalse(token.startsWith("https://"));
+    }
+
+    private static String renderStackTrace(Throwable throwable) {
+        StringWriter output = new StringWriter();
+        throwable.printStackTrace(new PrintWriter(output));
+        return output.toString();
     }
 
     private static void assertKnownAnswerToken(

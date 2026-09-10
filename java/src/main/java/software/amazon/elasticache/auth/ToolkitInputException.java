@@ -18,14 +18,4 @@ public class ToolkitInputException extends RuntimeException {
     public ToolkitInputException(String message) {
         super(message);
     }
-
-    /**
-     * Creates a correctable toolkit exception with its cause.
-     *
-     * @param message actionable error message
-     * @param cause underlying failure
-     */
-    public ToolkitInputException(String message, Throwable cause) {
-        super(message, cause);
-    }
 }

@@ -102,7 +102,7 @@ public final class ElastiCacheIamAuthTokenProvider {
         try {
             credentials = credentialsProvider.resolveCredentials();
         } catch (RuntimeException exception) {
-            throw new ConfigurationException(NO_CREDENTIALS_MESSAGE, exception);
+            throw new ConfigurationException(NO_CREDENTIALS_MESSAGE);
         }
         if (credentials == null
                 || !hasText(credentials.accessKeyId())
@@ -185,7 +185,7 @@ public final class ElastiCacheIamAuthTokenProvider {
                 return resolved;
             }
         } catch (SdkClientException exception) {
-            throw new ConfigurationException(NO_REGION_MESSAGE, exception);
+            throw new ConfigurationException(NO_REGION_MESSAGE);
         }
         throw new ConfigurationException(NO_REGION_MESSAGE);
     }
