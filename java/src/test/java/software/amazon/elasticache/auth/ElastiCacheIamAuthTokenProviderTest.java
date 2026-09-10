@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -139,6 +140,40 @@ class ElastiCacheIamAuthTokenProviderTest {
     }
 
     @Test
+    void nullRegionResultFailsAtConstruction() {
+        ConfigurationException exception = assertThrows(
+                ConfigurationException.class,
+                () -> providerBuilder()
+                        .serverlessCacheName(CACHE)
+                        .region(null)
+                        .awsRegionEnvironmentProvider(() -> null)
+                        .regionProvider(() -> null)
+                        .build());
+
+        assertTrue(exception.getMessage().contains("AWS_REGION"));
+        assertTrue(exception.getMessage().contains("AWS SDK"));
+    }
+
+    @Test
+    void validatesParametersBeforeResolvingRegion() {
+        AtomicInteger regionCalls = new AtomicInteger();
+
+        assertThrows(
+                InvalidParameterException.class,
+                () -> providerBuilder()
+                        .serverlessCacheName("invalid_name")
+                        .region(null)
+                        .awsRegionEnvironmentProvider(() -> null)
+                        .regionProvider(() -> {
+                            regionCalls.incrementAndGet();
+                            return REGION;
+                        })
+                        .build());
+
+        assertEquals(0, regionCalls.get());
+    }
+
+    @Test
     void readsCredentialsForEveryToken() {
         AtomicInteger calls = new AtomicInteger();
         AwsCredentialsProvider credentialsProvider = () -> {
@@ -171,17 +206,80 @@ class ElastiCacheIamAuthTokenProviderTest {
     }
 
     @Test
+    void retainsConstructionRegionWhileCredentialsRotate() {
+        AtomicInteger regionCalls = new AtomicInteger();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        AtomicReference<Region> regionSource = new AtomicReference<>(REGION);
+        AwsCredentialsProvider credentialsProvider = () ->
+                credentialCalls.getAndIncrement() == 0
+                        ? AwsBasicCredentials.create(
+                                "AKIAIOSFODNN7EXAMPLE", "first-secret")
+                        : AwsBasicCredentials.create(
+                                "AKIAI44QH8DHBEXAMPLE", "second-secret");
+
+        ElastiCacheIamAuthTokenProvider provider = providerBuilder()
+                .serverlessCacheName(CACHE)
+                .region(null)
+                .awsRegionEnvironmentProvider(() -> null)
+                .regionProvider(() -> {
+                    regionCalls.incrementAndGet();
+                    return regionSource.get();
+                })
+                .credentialsProvider(credentialsProvider)
+                .build();
+
+        regionSource.set(Region.EU_WEST_1);
+        String first = provider.getToken();
+        regionSource.set(Region.AP_SOUTHEAST_1);
+        String second = provider.getToken();
+
+        assertEquals(1, regionCalls.get());
+        assertEquals(2, credentialCalls.get());
+        assertTrue(first.contains("%2Fus-east-1%2F"));
+        assertTrue(second.contains("%2Fus-east-1%2F"));
+        assertFalse(first.contains("%2Feu-west-1%2F"));
+        assertFalse(second.contains("%2Fap-southeast-1%2F"));
+        assertNotEquals(first, second);
+    }
+
+    @Test
     void missingCredentialsHasActionableError() {
+        String providerDetail = "secret credential detail\nmust not escape";
         ElastiCacheIamAuthTokenProvider provider = providerBuilder()
                 .serverlessCacheName(CACHE)
                 .credentialsProvider(() -> {
-                    throw SdkClientException.create("missing");
+                    throw new IllegalStateException(providerDetail);
                 })
                 .build();
 
         ConfigurationException exception =
                 assertThrows(ConfigurationException.class, provider::getToken);
-        assertTrue(exception.getMessage().contains("credentials"));
+        assertEquals(
+                "No AWS credentials found. Configure credentials via the environment, "
+                        + "shared config/credentials files, or an instance/container role.",
+                exception.getMessage());
+        assertFalse(exception.getMessage().contains(providerDetail));
+    }
+
+    @Test
+    void unusableCredentialsHaveActionableError() {
+        AwsCredentials unusableCredentials = new AwsCredentials() {
+            @Override
+            public String accessKeyId() {
+                return "";
+            }
+
+            @Override
+            public String secretAccessKey() {
+                return "not-a-usable-key";
+            }
+        };
+        ElastiCacheIamAuthTokenProvider provider = providerBuilder()
+                .serverlessCacheName(CACHE)
+                .credentialsProvider(() -> unusableCredentials)
+                .build();
+
+        assertThrows(ConfigurationException.class, provider::getToken);
     }
 
     @Test
@@ -275,6 +373,17 @@ class ElastiCacheIamAuthTokenProviderTest {
                     .build();
             assertEquals(userId.toLowerCase(), provider.getUserId());
         }
+    }
+
+    @Test
+    void signsServiceManagedDefaultUser() {
+        ElastiCacheIamAuthTokenProvider provider = providerBuilder()
+                .serverlessCacheName(CACHE)
+                .userId("DEFAULT.IAM-USER")
+                .build();
+
+        assertEquals("default.iam-user", provider.getUserId());
+        assertTrue(provider.getToken().contains("User=default.iam-user"));
     }
 
     @Test

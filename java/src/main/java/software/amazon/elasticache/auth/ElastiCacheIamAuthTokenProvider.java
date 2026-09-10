@@ -101,10 +101,12 @@ public final class ElastiCacheIamAuthTokenProvider {
         AwsCredentials credentials;
         try {
             credentials = credentialsProvider.resolveCredentials();
-        } catch (SdkClientException exception) {
+        } catch (RuntimeException exception) {
             throw new ConfigurationException(NO_CREDENTIALS_MESSAGE, exception);
         }
-        if (credentials == null) {
+        if (credentials == null
+                || !hasText(credentials.accessKeyId())
+                || !hasText(credentials.secretAccessKey())) {
             throw new ConfigurationException(NO_CREDENTIALS_MESSAGE);
         }
 
