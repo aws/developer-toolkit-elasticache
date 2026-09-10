@@ -27,25 +27,34 @@ test("packed package installs and exposes its public API", () => {
   const packageDirectory = join(temporaryRoot, "package");
   const installationDirectory = join(temporaryRoot, "installed");
   const npmCacheDirectory = join(temporaryRoot, "npm-cache");
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npmCommand = process.env.npm_execpath
+    ? process.execPath
+    : process.platform === "win32"
+      ? "npm.cmd"
+      : "npm";
+  const npmCommandArgs = process.env.npm_execpath ? [process.env.npm_execpath] : [];
+  const npmSpawnOptions = {
+    cwd: PACKAGE_ROOT,
+    encoding: "utf8" as const,
+    env: {
+      ...process.env,
+      npm_config_cache: npmCacheDirectory,
+      npm_config_update_notifier: "false",
+    },
+    shell: process.platform === "win32" && !process.env.npm_execpath,
+  };
 
   try {
     mkdirSync(packageDirectory);
     mkdirSync(installationDirectory);
     const pack = spawnSync(
       npmCommand,
-      ["pack", "--json", "--pack-destination", packageDirectory],
+      [...npmCommandArgs, "pack", "--json", "--pack-destination", packageDirectory],
       {
-        cwd: PACKAGE_ROOT,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          npm_config_cache: npmCacheDirectory,
-          npm_config_update_notifier: "false",
-        },
+        ...npmSpawnOptions,
       },
     );
-    assert.equal(pack.status, 0, pack.stderr);
+    assert.equal(pack.status, 0, pack.error?.message ?? pack.stderr);
 
     const packResult = JSON.parse(pack.stdout) as PackResult[];
     const packed = packResult[0];
@@ -63,6 +72,7 @@ test("packed package installs and exposes its public API", () => {
     const install = spawnSync(
       npmCommand,
       [
+        ...npmCommandArgs,
         "install",
         tarballPath,
         "--ignore-scripts",
@@ -72,14 +82,8 @@ test("packed package installs and exposes its public API", () => {
         installationDirectory,
       ],
       {
-        cwd: PACKAGE_ROOT,
-        encoding: "utf8",
+        ...npmSpawnOptions,
         timeout: NPM_INSTALL_TIMEOUT_MS,
-        env: {
-          ...process.env,
-          npm_config_cache: npmCacheDirectory,
-          npm_config_update_notifier: "false",
-        },
       },
     );
     assert.equal(
@@ -88,7 +92,7 @@ test("packed package installs and exposes its public API", () => {
       install.signal
         ? `npm install was killed with ${install.signal} (likely no registry access; ` +
             `this test installs the packed tarball's dependencies from the npm registry)`
-        : install.stderr,
+        : (install.error?.message ?? install.stderr),
     );
 
     const installedNodeModules = join(installationDirectory, "node_modules");
@@ -108,7 +112,11 @@ test("packed package installs and exposes its public API", () => {
       cwd: installationDirectory,
       encoding: "utf8",
     });
-    assert.equal(exportsProbe.status, 0, exportsProbe.stderr);
+    assert.equal(
+      exportsProbe.status,
+      0,
+      exportsProbe.error?.message ?? exportsProbe.stderr,
+    );
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
   }
