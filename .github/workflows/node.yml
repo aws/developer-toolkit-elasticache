@@ -3,7 +3,9 @@ name: Node CI
 # Path-filtered so the Node package is validated independently.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "release-*"
     paths:
       - "node/**"
       - ".github/workflows/node.yml"
