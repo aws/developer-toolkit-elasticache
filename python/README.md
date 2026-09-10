@@ -7,15 +7,19 @@ connection password for an IAM-enabled user.
 
 ## Installation
 
-Requires Python 3.10–3.14, `pip`, and `git`. Install from the source repository:
+Requires Python 3.10–3.14 and `pip`. Install from PyPI:
 
 ```bash
-git clone https://github.com/aws/developer-toolkit-elasticache.git
-cd developer-toolkit-elasticache/python
-python3 -m pip install .
+python3 -m pip install developer-toolkit-elasticache
 ```
 
-This installs the library and the `developer-toolkit-elasticache` command.
+If you don't have [`pip`](https://pip.pypa.io) installed, this
+[Python installation guide](https://docs.python-guide.org/starting/installation/) can
+guide you through the process.
+
+This installs the library and the `developer-toolkit-elasticache` command. To install
+from source instead, clone the repository and run `python3 -m pip install .` from the
+`python/` directory.
 
 ## Usage
 

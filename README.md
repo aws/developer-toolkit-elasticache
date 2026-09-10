@@ -1,1 +1,54 @@
-# developer-toolkit-elasticache
+# Developer Toolkit for ElastiCache
+
+This repository contains tools to work with [Amazon ElastiCache](https://aws.amazon.com/elasticache/).
+
+The Python library offers [IAM authentication](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html)
+for ElastiCache: generates a signed token that ElastiCache requires for connection
+with an IAM-enabled user, so applications can authenticate to a Valkey or
+Redis OSS cache with AWS credentials.
+
+## Packages
+
+| Language | Package | Documentation |
+|---|---|---|
+| Python | [`developer-toolkit-elasticache`](https://pypi.org/project/developer-toolkit-elasticache/) on PyPI | [python/README.md](python/README.md) |
+
+
+## Quick start (Python)
+
+```bash
+python3 -m pip install developer-toolkit-elasticache
+```
+
+```python
+from developer_toolkit_elasticache import generate_iam_auth_token
+
+token = generate_iam_auth_token(
+    serverless_cache_name="my-cache",  # or replication_group_id="my-group"
+    user_id="iam-user",
+    region="us-east-1",
+)
+```
+
+Use the returned token as the password when connecting to the cache. See the
+[Python README](python/README.md) for requirements, the credential chain, the Python
+command-line tool, and client integration examples.
+
+## Getting help
+
+Please use these community resources for getting help. We use the GitHub issues for
+tracking bugs and feature requests.
+
+- Ask a question or [open a discussion](https://github.com/aws/developer-toolkit-elasticache/discussions).
+- If you think you may have found a bug, please [open an issue](https://github.com/aws/developer-toolkit-elasticache/issues/new).
+
+
+## Contributing
+
+Contributions are welcome. Open an issue to discuss a change before sending a pull
+request; all changes are reviewed before merging.
+
+## License
+
+This project is licensed under the Apache-2.0 License. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).

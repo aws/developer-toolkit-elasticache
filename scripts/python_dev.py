@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Python task runner — one entry point for every Python CI/CD step, run locally or
-from the workflows. Requires Python 3.11+ (tomllib) for `verify` and `versions`
+from the workflows. Requires Python 3.11+ (tomllib) for `verify` and `list-supported-versions`.
 
     ./python_dev.py setup                    # install the package + all dev tooling
     ./python_dev.py lint                     # ruff check + format --check
@@ -13,8 +13,8 @@ from the workflows. Requires Python 3.11+ (tomllib) for `verify` and `versions`
     ./python_dev.py smoke [VERSION]          # install from PyPI + assert version + run CLI
     ./python_dev.py ci                       # setup + lint + test + package (pre-flight)
 
-lint/test/build run inside a .venv the runner creates and reuses, so there is no
-manual `python -m venv` step; delete .venv to rebuild it against a different
+lint/test/package run inside a .venv the runner creates and reuses, so there is no
+manual `python -m venv` step; delete python/.venv to rebuild it against a different
 interpreter.
 """
 
@@ -58,7 +58,7 @@ def run(*args: object) -> None:
 def venv_python() -> str:
     """Create the managed .venv on first use and return its Python interpreter.
 
-    Lets the runner own an isolated environment, so `./dev.py test` works with no
+    Lets the runner own an isolated environment, so `./python_dev.py test` works with no
     manual `python -m venv`. In CI each job is a fresh runner, so the .venv is built
     from that job's interpreter — honouring the matrix version.
     """
@@ -239,9 +239,7 @@ def ci(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        prog="dev.py", description="Developer/CI task runner."
-    )
+    parser = argparse.ArgumentParser(description="Python task runner.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name, arg in _COMMANDS.items():
         subparser = subparsers.add_parser(name)
