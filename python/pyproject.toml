@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "developer-toolkit-elasticache"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "Developer toolkit for Amazon ElastiCache"
 readme = "README.md"
 license = "Apache-2.0"
@@ -18,12 +18,9 @@ requires-python = ">=3.10"
 dependencies = [
     "botocore>=1.43.0",
 ]
-# NOTE: This project is in active development and is NOT ready to publish.
-# The "Private :: Do Not Upload" classifier makes PyPI reject any upload of
-# this package. Do not remove it until we have explicitly decided to publish.
 classifiers = [
     "Private :: Do Not Upload",
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
