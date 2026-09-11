@@ -16,7 +16,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>8</maven.compiler.release>
         <lettuce.version>7.7.0.RELEASE</lettuce.version>
-        <junit.version>5.13.4</junit.version>
     </properties>
 
     <dependencies>
@@ -29,18 +28,6 @@
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
             <version>${lettuce.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-api</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-engine</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
