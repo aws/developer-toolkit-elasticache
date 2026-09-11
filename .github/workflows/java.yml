@@ -11,6 +11,9 @@ on:
       - "java/**"
       - ".github/workflows/java.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Java ${{ matrix.java-version }} on ${{ matrix.os }}
