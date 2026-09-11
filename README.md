@@ -17,6 +17,8 @@ cache with AWS credentials.
 | Java | `software.amazon.elasticache:developer-toolkit-elasticache` | [java/README.md](java/README.md) |
 | Node.js | `@aws/developer-toolkit-elasticache` on npm | [node/README.md](node/README.md) |
 
+See the project [changelog](CHANGELOG.md) for release notes for all language packages.
+
 ## Quick start
 
 ### Python
