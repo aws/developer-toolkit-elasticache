@@ -4,5 +4,10 @@
 *.iml
 .vscode/
 
-# Language-specific ignores live in python/.gitignore and node/.gitignore so
+# Python helper scripts at the repository root.
+__pycache__/
+*.py[cod]
+
+# Language-specific ignores live in python/.gitignore, java/.gitignore, and
+# node/.gitignore so
 # each package stays self-contained.

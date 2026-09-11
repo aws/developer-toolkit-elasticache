@@ -9,13 +9,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>software.amazon.elasticache</groupId>
-    <artifactId>developer-toolkit-elasticache-examples</artifactId>
+    <artifactId>developer-toolkit-elasticache-integration-tests</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>8</maven.compiler.release>
-        <lettuce.version>7.7.0.RELEASE</lettuce.version>
         <junit.version>5.13.4</junit.version>
     </properties>
 
@@ -24,11 +23,6 @@
             <groupId>software.amazon.elasticache</groupId>
             <artifactId>developer-toolkit-elasticache</artifactId>
             <version>0.1.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>io.lettuce</groupId>
-            <artifactId>lettuce-core</artifactId>
-            <version>${lettuce.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -55,9 +49,12 @@
                 </configuration>
             </plugin>
             <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.5.0</version>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <skipIfEmpty>true</skipIfEmpty>
+                </configuration>
             </plugin>
         </plugins>
     </build>

@@ -26,6 +26,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>8</maven.compiler.release>
+        <java.supported.versions>["8","11","17","21"]</java.supported.versions>
         <aws.sdk.version>2.54.10</aws.sdk.version>
         <junit.version>5.13.4</junit.version>
     </properties>

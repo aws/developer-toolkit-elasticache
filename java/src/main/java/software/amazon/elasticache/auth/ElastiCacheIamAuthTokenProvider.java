@@ -63,7 +63,7 @@ public final class ElastiCacheIamAuthTokenProvider {
         Target target = resolveTarget(builder.serverlessCacheName, builder.replicationGroupId);
         this.cacheName = target.cacheName;
         this.serverless = target.serverless;
-        this.userId = validateAndNormalize("user_id", builder.userId, USER_ID_PATTERN);
+        this.userId = validateAndNormalize("userId", builder.userId, USER_ID_PATTERN);
         this.region = resolveRegion(
                 builder.region, builder.awsRegionEnvironmentProvider, builder.regionProvider);
         this.credentialsProvider = builder.credentialsProvider == null
@@ -145,18 +145,18 @@ public final class ElastiCacheIamAuthTokenProvider {
         boolean hasReplicationGroup = hasText(replicationGroupId);
         if (hasServerless == hasReplicationGroup) {
             throw new InvalidParameterException(
-                    "Invalid parameter combination for 'serverless_cache_name' and "
-                            + "'replication_group_id': exactly one must be provided.");
+                    "Invalid parameter combination for 'serverlessCacheName' and "
+                            + "'replicationGroupId': exactly one must be provided.");
         }
         if (hasServerless) {
             return new Target(
                     validateAndNormalize(
-                            "serverless_cache_name", serverlessCacheName, CACHE_NAME_PATTERN),
+                            "serverlessCacheName", serverlessCacheName, CACHE_NAME_PATTERN),
                     true);
         }
         return new Target(
                 validateAndNormalize(
-                        "replication_group_id", replicationGroupId, CACHE_NAME_PATTERN),
+                        "replicationGroupId", replicationGroupId, CACHE_NAME_PATTERN),
                 false);
     }
 

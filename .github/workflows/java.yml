@@ -5,33 +5,51 @@ on:
     branches: [main, release-2]
     paths:
       - "java/**"
+      - "scripts/java_dev.py"
       - ".github/workflows/java.yml"
   pull_request:
     paths:
       - "java/**"
+      - "scripts/java_dev.py"
       - ".github/workflows/java.yml"
 
 permissions:
   contents: read
 
 jobs:
+  versions:
+    name: Java versions
+    runs-on: ubuntu-latest
+    outputs:
+      data: ${{ steps.set.outputs.data }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load supported versions from pom.xml
+        id: set
+        run: echo "data=$(python3 scripts/java_dev.py list-supported-versions)" >> "$GITHUB_OUTPUT"
+
   test:
     name: Java ${{ matrix.java-version }} on ${{ matrix.os }}
+    needs: versions
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # Every supported version runs on Linux. Other platforms test the
+        # ends of the range, where runtime differences are most likely.
         os: [ubuntu-latest]
-        java-version: ["8", "11", "17", "21"]
+        java-version: ${{ fromJson(needs.versions.outputs.data).all }}
         include:
           - os: windows-latest
-            java-version: "8"
+            java-version: "${{ fromJson(needs.versions.outputs.data).min }}"
           - os: windows-latest
-            java-version: "21"
+            java-version: "${{ fromJson(needs.versions.outputs.data).max }}"
           - os: macos-14
-            java-version: "8"
+            java-version: "${{ fromJson(needs.versions.outputs.data).min }}"
           - os: macos-14
-            java-version: "21"
+            java-version: "${{ fromJson(needs.versions.outputs.data).max }}"
 
     steps:
       - name: Check out the repository
@@ -46,11 +64,16 @@ jobs:
           cache-dependency-path: |
             java/pom.xml
             java/examples/pom.xml
+            java/integration-tests/pom.xml
 
       - name: Build and test
         working-directory: java
         run: mvn --batch-mode --no-transfer-progress install
 
-      - name: Compile standalone example
+      - name: Build documentation examples
         working-directory: java
         run: mvn --batch-mode --no-transfer-progress --file examples/pom.xml verify
+
+      - name: Run installed-artifact integration tests
+        working-directory: java
+        run: mvn --batch-mode --no-transfer-progress --file integration-tests/pom.xml verify

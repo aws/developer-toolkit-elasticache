@@ -315,7 +315,7 @@ class ElastiCacheIamAuthTokenProviderTest {
             InvalidParameterException exception = assertThrows(
                     InvalidParameterException.class,
                     () -> providerBuilder().serverlessCacheName(badName).build());
-            assertTrue(exception.getMessage().contains("serverless_cache_name"));
+            assertTrue(exception.getMessage().contains("serverlessCacheName"));
         }
     }
 
@@ -325,7 +325,7 @@ class ElastiCacheIamAuthTokenProviderTest {
                 InvalidParameterException.class,
                 () -> providerBuilder().replicationGroupId("bad_name!").build());
 
-        assertTrue(exception.getMessage().contains("replication_group_id"));
+        assertTrue(exception.getMessage().contains("replicationGroupId"));
     }
 
     @Test
@@ -342,7 +342,7 @@ class ElastiCacheIamAuthTokenProviderTest {
                 InvalidParameterException.class,
                 () -> providerBuilder().serverlessCacheName(hostile).build());
 
-        assertTrue(exception.getMessage().contains("serverless_cache_name"));
+        assertTrue(exception.getMessage().contains("serverlessCacheName"));
         assertFalse(exception.getMessage().contains(hostile));
     }
 
@@ -365,7 +365,7 @@ class ElastiCacheIamAuthTokenProviderTest {
                             .serverlessCacheName(CACHE)
                             .userId(userId)
                             .build());
-            assertTrue(exception.getMessage().contains("user_id"));
+            assertTrue(exception.getMessage().contains("userId"));
         }
 
         for (String userId : Arrays.asList(

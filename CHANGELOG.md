@@ -23,10 +23,9 @@ package uses [Semantic Versioning](https://semver.org/).
 - Region resolution follows the Java contract: explicit region, then `AWS_REGION`,
   then the standard AWS SDK region provider chain. Unlike botocore, the AWS SDK for
   Java does not read `AWS_DEFAULT_REGION`.
-- A standalone Java example demonstrates TLS connection, IAM authentication, and
-  `PING` against an ElastiCache serverless cache without adding a client-library
-  dependency to the toolkit. The example verifies the endpoint hostname during
-  the TLS handshake.
+- Java examples demonstrate Lettuce `RedisCredentialsProvider` integration and the
+  raw TLS/Redis protocol exchange for custom clients and proxies. The wire-level
+  example verifies the endpoint hostname during the TLS handshake.
 
 ## Python
 
