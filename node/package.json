@@ -8,12 +8,16 @@
   "engines": {
     "node": ">=22"
   },
+  "supportedNodeVersions": [
+    "22.x",
+    "24.x"
+  ],
   "files": [
     "dist",
+    "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
-    "README.md",
-    "examples"
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -30,6 +34,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "list-supported-versions": "node scripts/list-supported-versions.mjs",
     "package:check": "npm run clean && npm run build && npm pack --dry-run",
     "test": "npm run build && npm run build:test && node --test dist-test/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"

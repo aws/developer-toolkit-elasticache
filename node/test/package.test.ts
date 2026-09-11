@@ -60,12 +60,12 @@ test("packed package installs and exposes its public API", () => {
     const packed = packResult[0];
     assert.ok(packed);
     assert.equal(
-      packed.files.some((file) => file.path === "examples/generate-token.mjs"),
+      packed.files.some((file) => file.path === "CHANGELOG.md"),
       true,
     );
     assert.equal(
-      packed.files.some((file) => file.path === "examples/connect-valkey.mjs"),
-      true,
+      packed.files.some((file) => file.path.startsWith("examples/")),
+      false,
     );
 
     const tarballPath = join(packageDirectory, packed.filename);

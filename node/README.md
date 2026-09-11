@@ -85,24 +85,26 @@ const password = await auth.getToken();
 
 Pass `username` and `password` to the client connection configuration. Fetch another token
 whenever the client creates a new connection. See
-[`examples/connect-valkey.mjs`](examples/connect-valkey.mjs) for a Valkey GLIDE bridge.
+[`examples/connect-iovalkey.mjs`](examples/connect-iovalkey.mjs) for an iovalkey
+integration.
 
 ### Examples
 
-The package includes runnable ESM examples for Node.js 22 and newer. After installing the
-package and configuring AWS credentials, run:
+The source repository includes runnable ESM examples for Node.js 22 and newer. After
+installing the package and configuring AWS credentials, run:
 
 ```bash
 node examples/generate-token.mjs
 ```
 
-The Valkey GLIDE example uses an optional client dependency and does not add it to this
+The iovalkey example demonstrates integration with a client that does not provide built-in
+ElastiCache IAM authentication. It is an optional dependency and is not added to this
 package's runtime dependencies. Install it in the application that runs the example, then
 run:
 
 ```bash
-npm install @valkey/valkey-glide
-node examples/connect-valkey.mjs
+npm install iovalkey
+node examples/connect-iovalkey.mjs
 ```
 
 ## Errors

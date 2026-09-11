@@ -18,14 +18,30 @@ permissions:
   contents: read
 
 jobs:
+  # Load the test matrix from package.json's supportedNodeVersions.
+  versions:
+    name: node versions
+    runs-on: ubuntu-latest
+    outputs:
+      data: ${{ steps.set.outputs.data }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Generate supported versions from package.json
+        id: set
+        working-directory: node
+        run: echo "data=$(npm run --silent list-supported-versions)" >> "$GITHUB_OUTPUT"
+
   test:
     name: Node ${{ matrix.node-version }} (${{ matrix.os }})
+    needs: versions
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node-version: ["22.x", "24.x"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ${{ fromJson(needs.versions.outputs.data).all }}
     defaults:
       run:
         working-directory: node
