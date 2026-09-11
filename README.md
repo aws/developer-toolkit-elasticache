@@ -1,20 +1,24 @@
 # Developer Toolkit for ElastiCache
 
-This repository contains tools to work with [Amazon ElastiCache](https://aws.amazon.com/elasticache/).
+This repository contains libraries and tools for working with
+[Amazon ElastiCache](https://aws.amazon.com/elasticache/).
 
-The Python library offers [IAM authentication](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html)
-for ElastiCache: generates a signed token that ElastiCache requires for connection
-with an IAM-enabled user, so applications can authenticate to a Valkey or
-Redis OSS cache with AWS credentials.
+The Python and Node.js libraries support
+[IAM authentication](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html)
+for ElastiCache. They generate the signed token required to connect with an
+IAM-enabled user, allowing applications to authenticate to a Valkey or Redis OSS
+cache with AWS credentials.
 
 ## Packages
 
 | Language | Package | Documentation |
 |---|---|---|
 | Python | [`developer-toolkit-elasticache`](https://pypi.org/project/developer-toolkit-elasticache/) on PyPI | [python/README.md](python/README.md) |
+| Node.js | `@aws/developer-toolkit-elasticache` on npm | [node/README.md](node/README.md) |
 
+## Quick start
 
-## Quick start (Python)
+### Python
 
 ```bash
 python3 -m pip install developer-toolkit-elasticache
@@ -33,6 +37,26 @@ token = generate_iam_auth_token(
 Use the returned token as the password when connecting to the cache. See the
 [Python README](python/README.md) for requirements, the credential chain, the Python
 command-line tool, and client integration examples.
+
+### Node.js
+
+```bash
+npm install @aws/developer-toolkit-elasticache
+```
+
+```typescript
+import { generateIamAuthToken } from "@aws/developer-toolkit-elasticache";
+
+const token = await generateIamAuthToken({
+  serverlessCacheName: "my-cache", // or replicationGroupId: "my-group"
+  userId: "iam-user",
+  region: "us-east-1",
+});
+```
+
+Use the returned token as the password when connecting to the cache. See the
+[Node.js README](node/README.md) for requirements, the credential and region
+chains, the async token provider, and client integration examples.
 
 ## Getting help
 

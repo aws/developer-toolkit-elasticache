@@ -1,0 +1,14 @@
+# Build artifacts
+dist/
+dist-test/
+node_modules/
+
+# npm
+*.tgz
+npm-debug.log*
+
+# Test / coverage output
+coverage/
+
+# OS / editor
+.DS_Store
