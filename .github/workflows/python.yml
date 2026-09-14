@@ -15,6 +15,9 @@ on:
       - "scripts/**"
       - ".github/workflows/python.yml"
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: lint
