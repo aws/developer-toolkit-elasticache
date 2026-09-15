@@ -131,9 +131,9 @@ and password separately.
 
 The region is resolved when the manager is created, but credentials are not resolved and
 no token is signed until the first `getToken()` or `getCredentials()` call. After that,
-`getToken()` returns the
-cached token immediately while it is valid, starting a background refresh once the token
-is past its refresh point. Concurrent callers with no valid token share a single refresh.
+`getToken()` returns the cached token immediately while it is valid, starting a background
+refresh once the token is past its refresh point. Concurrent callers with no valid token
+share a single refresh.
 
 A refresh makes up to 8 attempts, the first immediate and the rest with jittered
 exponential backoff capped at 5 seconds. While the current token is still valid, a failed
