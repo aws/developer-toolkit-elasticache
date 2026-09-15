@@ -11,32 +11,55 @@
  * The cache name used for signing is different from the connection endpoint.
  * For a node-based deployment, use replicationGroupId instead.
  *
- * iovalkey does not generate ElastiCache IAM authentication tokens. This
- * short-lived example disables automatic reconnects because they would reuse
- * the initial token. Long-running applications should create a replacement
- * client with a fresh token whenever the connection is lost.
+ * iovalkey does not generate ElastiCache IAM authentication tokens, and it
+ * cannot re-authenticate an existing connection. This example uses
+ * ElastiCacheIAMAuthTokenManager, which caches one token and refreshes it in
+ * the background, so every new client is created with a valid token without
+ * signing a new one per connection. Automatic reconnects are disabled because
+ * they would reuse the token the connection was opened with; long-running
+ * applications should create a replacement client, calling getToken() again,
+ * whenever the connection is lost.
  */
 import { Valkey } from "iovalkey";
-import { ElastiCacheIAMAuthTokenProvider } from "@aws/developer-toolkit-elasticache";
+import { ElastiCacheIAMAuthTokenManager } from "@aws/developer-toolkit-elasticache";
 
-const auth = await ElastiCacheIAMAuthTokenProvider.create({
+const ENDPOINT = "my-cache-abc123.serverless.use1.cache.amazonaws.com";
+
+const auth = await ElastiCacheIAMAuthTokenManager.create({
   serverlessCacheName: "my-cache",
   userId: "my-iam-user",
   region: "us-east-1",
+  // Never log the token itself; it is a bearer credential.
+  onTokenChanged: () => console.log("installed a new IAM auth token"),
 });
 
-const client = new Valkey({
-  host: "my-cache-abc123.serverless.use1.cache.amazonaws.com",
-  port: 6379,
-  username: auth.userId,
-  password: await auth.getToken(),
-  tls: {},
-  retryStrategy: () => null,
-});
+async function connect() {
+  return new Valkey({
+    host: ENDPOINT,
+    port: 6379,
+    username: auth.userId,
+    password: await auth.getToken(),
+    tls: {},
+    retryStrategy: () => null,
+  });
+}
 
 try {
-  await client.set("hello", "world");
-  console.log(await client.get("hello"));
+  const client = await connect();
+  try {
+    await client.set("hello", "world");
+    console.log(await client.get("hello"));
+  } finally {
+    client.disconnect();
+  }
+
+  // A second connection reuses the cached token instead of signing another one.
+  const replacement = await connect();
+  try {
+    console.log(await replacement.get("hello"));
+  } finally {
+    replacement.disconnect();
+  }
 } finally {
-  client.disconnect();
+  auth.close();
 }

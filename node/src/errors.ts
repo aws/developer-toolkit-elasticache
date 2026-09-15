@@ -31,3 +31,15 @@ export class ConfigurationError extends ToolkitInputError {
     this.name = "ConfigurationError";
   }
 }
+
+/**
+ * A cached token could not be refreshed before it expired, or the token manager
+ * was closed. This is an operational failure rather than an input error, so it
+ * does not extend {@link ToolkitInputError}.
+ */
+export class TokenRefreshError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "TokenRefreshError";
+  }
+}

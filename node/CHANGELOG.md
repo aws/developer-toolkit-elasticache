@@ -12,5 +12,9 @@ All notable changes to the Node.js package are documented here. The format follo
   serverless caches and node-based replication groups.
 - `ElastiCacheIAMAuthTokenProvider` for generating fresh tokens when clients connect or
   reconnect.
-- `ToolkitInputError`, `InvalidParameterError`, and `ConfigurationError`.
+- `ElastiCacheIAMAuthTokenManager` for caching a token, refreshing it in the background
+  before it expires, retrying transient refresh failures, and notifying an
+  `onTokenChanged` callback.
+- `ToolkitInputError`, `InvalidParameterError`, `ConfigurationError`, and
+  `TokenRefreshError`.
 - Runnable token-generation and iovalkey integration examples under `examples/`.

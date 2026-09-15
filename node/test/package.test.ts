@@ -101,11 +101,14 @@ test("packed package installs and exposes its public API", () => {
       exportsProbePath,
       [
         'import assert from "node:assert/strict";',
-        'import { ConfigurationError, ElastiCacheIAMAuthTokenProvider, InvalidParameterError, ToolkitInputError, generateIamAuthToken } from "@aws/developer-toolkit-elasticache";',
+        'import { ConfigurationError, ElastiCacheIAMAuthTokenManager, ElastiCacheIAMAuthTokenProvider, InvalidParameterError, TokenRefreshError, ToolkitInputError, generateIamAuthToken } from "@aws/developer-toolkit-elasticache";',
         'assert.equal(typeof generateIamAuthToken, "function");',
         'assert.equal(typeof ElastiCacheIAMAuthTokenProvider, "function");',
+        'assert.equal(typeof ElastiCacheIAMAuthTokenManager, "function");',
         "assert.equal(ConfigurationError.prototype instanceof ToolkitInputError, true);",
         "assert.equal(ConfigurationError.prototype instanceof InvalidParameterError, false);",
+        "assert.equal(TokenRefreshError.prototype instanceof ToolkitInputError, false);",
+        "assert.equal(TokenRefreshError.prototype instanceof Error, true);",
       ].join("\n"),
     );
     const exportsProbe = spawnSync(process.execPath, [exportsProbePath], {
@@ -127,7 +130,9 @@ test("package root exports the complete public API", async () => {
 
   assert.equal(typeof packageModule.generateIamAuthToken, "function");
   assert.equal(typeof packageModule.ElastiCacheIAMAuthTokenProvider, "function");
+  assert.equal(typeof packageModule.ElastiCacheIAMAuthTokenManager, "function");
   assert.equal(typeof packageModule.ToolkitInputError, "function");
+  assert.equal(typeof packageModule.TokenRefreshError, "function");
   assert.equal(typeof packageModule.InvalidParameterError, "function");
   assert.equal(typeof packageModule.ConfigurationError, "function");
   assert.equal(
@@ -137,6 +142,10 @@ test("package root exports the complete public API", async () => {
   assert.equal(
     packageModule.ConfigurationError.prototype instanceof
       packageModule.InvalidParameterError,
+    false,
+  );
+  assert.equal(
+    packageModule.TokenRefreshError.prototype instanceof packageModule.ToolkitInputError,
     false,
   );
 });

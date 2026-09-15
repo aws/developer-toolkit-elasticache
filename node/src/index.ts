@@ -4,6 +4,7 @@
 export {
   ConfigurationError,
   InvalidParameterError,
+  TokenRefreshError,
   ToolkitInputError,
 } from "./errors.js";
 export type {
@@ -14,3 +15,10 @@ export {
   ElastiCacheIAMAuthTokenProvider,
   generateIamAuthToken,
 } from "./token-generator.js";
+export type {
+  TokenManagerDependencies,
+  TokenManagerOptions,
+  TokenManagerScheduler,
+  TokenManagerTimer,
+} from "./token-manager.js";
+export { ElastiCacheIAMAuthTokenManager } from "./token-manager.js";
