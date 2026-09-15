@@ -14,7 +14,8 @@ All notable changes to the Node.js package are documented here. The format follo
   reconnect.
 - `ElastiCacheIAMAuthTokenManager` for caching a token, refreshing it in the background
   before it expires, retrying transient refresh failures, and notifying an
-  `onTokenChanged` callback.
+  `onTokenChanged` callback. Its no-argument `getCredentials()` hook returns the user id
+  and current token together for client credential-provider integrations.
 - `ToolkitInputError`, `InvalidParameterError`, `ConfigurationError`, and
   `TokenRefreshError`.
 - Runnable token-generation and iovalkey integration examples under `examples/`.

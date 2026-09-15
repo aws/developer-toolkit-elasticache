@@ -59,6 +59,9 @@ shared config and credentials files, SSO, assume-role, container credentials, an
 instance metadata. One-shot calls resolve the region and credentials for each invocation,
 so refreshed configuration and credentials are used.
 
+Token generation cannot detect expired or otherwise invalid credentials: signing may
+succeed, but ElastiCache will reject the connection, for example with `WRONGPASS`.
+
 ### Reconnecting clients
 
 `ElastiCacheIAMAuthTokenProvider` is client-agnostic. It resolves and retains the region
@@ -116,14 +119,19 @@ const auth = await ElastiCacheIAMAuthTokenManager.create({
 });
 
 try {
-  const password = await auth.getToken();
+  const [username, password] = await auth.getCredentials();
 } finally {
   auth.close();
 }
 ```
 
+`getCredentials()` is the no-argument provider hook for integrations that expect the user
+id and token together. `getToken()` remains available when the client accepts the username
+and password separately.
+
 The region is resolved when the manager is created, but credentials are not resolved and
-no token is signed until the first `getToken()` call. After that, `getToken()` returns the
+no token is signed until the first `getToken()` or `getCredentials()` call. After that,
+`getToken()` returns the
 cached token immediately while it is valid, starting a background refresh once the token
 is past its refresh point. Concurrent callers with no valid token share a single refresh.
 
@@ -169,8 +177,8 @@ The public error hierarchy is:
 
 `TokenRefreshError` is an operational failure rather than an input error, so it extends
 `Error` directly. It is only thrown by `ElastiCacheIAMAuthTokenManager`, when a cached
-token expired before a refresh could replace it or when the manager is closed. Its `cause`
-is the error from the last refresh attempt.
+token expired before a refresh could replace it or when the manager is closed. When a
+refresh failed, its `cause` is the error from the last refresh attempt.
 
 ## Security
 

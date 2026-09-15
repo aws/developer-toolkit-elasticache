@@ -17,8 +17,8 @@
  * the background, so every new client is created with a valid token without
  * signing a new one per connection. Automatic reconnects are disabled because
  * they would reuse the token the connection was opened with; long-running
- * applications should create a replacement client, calling getToken() again,
- * whenever the connection is lost.
+ * applications should create a replacement client, calling getCredentials()
+ * again, whenever the connection is lost.
  */
 import { Valkey } from "iovalkey";
 import { ElastiCacheIAMAuthTokenManager } from "@aws/developer-toolkit-elasticache";
@@ -34,11 +34,12 @@ const auth = await ElastiCacheIAMAuthTokenManager.create({
 });
 
 async function connect() {
+  const [username, password] = await auth.getCredentials();
   return new Valkey({
     host: ENDPOINT,
     port: 6379,
-    username: auth.userId,
-    password: await auth.getToken(),
+    username,
+    password,
     tls: {},
     retryStrategy: () => null,
   });

@@ -96,6 +96,7 @@ function harness(
   overrides: {
     refreshAfterSeconds?: number;
     onTokenChanged?: (token: string) => void;
+    userId?: string;
   } = {},
 ): Harness {
   const clock = new TestClock();
@@ -106,7 +107,7 @@ function harness(
   const manager = new ElastiCacheIAMAuthTokenManager(
     {
       serverlessCacheName: CACHE,
-      userId: USER,
+      userId: overrides.userId ?? USER,
       region: REGION,
       refreshAfterSeconds: overrides.refreshAfterSeconds,
       onTokenChanged: overrides.onTokenChanged ?? ((token) => changedTokens.push(token)),
@@ -200,6 +201,19 @@ test("shares one initial token mint across concurrent callers", async () => {
   }
 });
 
+test("returns the user id and cached token from the credential-provider hook", async () => {
+  const { manager, credentialCalls } = harness({ userId: "TestUser" });
+  try {
+    const [userId, token] = await manager.getCredentials();
+
+    assert.equal(userId, USER);
+    assert.equal(token, await manager.getToken());
+    assert.equal(credentialCalls(), 1);
+  } finally {
+    manager.close();
+  }
+});
+
 test("retries refresh failures with capped exponential backoff", async () => {
   const { clock, manager, credentialCalls, fail } = harness();
   fail();
@@ -279,6 +293,20 @@ test("ignores onTokenChanged callback failures", async () => {
   }
 });
 
+test("ignores async onTokenChanged callback rejections", async () => {
+  const manager = harness({
+    onTokenChanged: async () => {
+      throw new Error("async consumer callback failed");
+    },
+  }).manager;
+  try {
+    assert.equal(typeof (await manager.getToken()), "string");
+    await flush();
+  } finally {
+    manager.close();
+  }
+});
+
 test("close cancels background work and rejects later requests", async () => {
   const { clock, manager, credentialCalls } = harness();
   await manager.getToken();
@@ -287,6 +315,36 @@ test("close cancels background work and rejects later requests", async () => {
 
   assert.equal(credentialCalls(), 1);
   await assert.rejects(() => manager.getToken(), TokenRefreshError);
+});
+
+test("close prevents retry when an in-flight mint fails", async () => {
+  const clock = new TestClock();
+  let rejectCredentials!: (reason: Error) => void;
+  const credentials = new Promise<typeof CREDENTIALS>((_resolve, reject) => {
+    rejectCredentials = reject;
+  });
+  const manager = new ElastiCacheIAMAuthTokenManager(
+    {
+      serverlessCacheName: CACHE,
+      userId: USER,
+      region: REGION,
+    },
+    {
+      credentialProvider: () => credentials,
+      signingDate: SIGNING_DATE,
+      now: clock.now,
+      random: () => 0.5,
+      scheduler: clock.scheduler,
+    },
+  );
+  const result = manager.getToken();
+  await flush();
+  manager.close();
+
+  const rejection = assert.rejects(result, TokenRefreshError);
+  rejectCredentials(new Error("credential chain failed"));
+  await rejection;
+  assert.equal(clock.created.length, 0);
 });
 
 for (const refreshAfterSeconds of [0, -1, 900, Number.NaN, Number.POSITIVE_INFINITY]) {

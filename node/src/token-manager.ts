@@ -38,8 +38,9 @@ export interface TokenManagerOptions extends TokenGeneratorOptions {
    */
   refreshAfterSeconds?: number;
   /**
-   * Called with each newly installed token. A callback failure is ignored: it
-   * must not discard a token that was minted successfully.
+   * Called with each newly installed token. Synchronous throws and rejected
+   * callback promises are ignored: they must not discard a token that was
+   * minted successfully.
    */
   onTokenChanged?: (token: string) => void;
 }
@@ -139,6 +140,14 @@ export class ElastiCacheIAMAuthTokenManager {
   }
 
   /**
+   * Return the normalized user id and a valid token for credential-provider
+   * integrations.
+   */
+  async getCredentials(): Promise<[userId: string, token: string]> {
+    return [this.userId, await this.getToken()];
+  }
+
+  /**
    * Return a valid token, minting one on the first call.
    *
    * While a cached token remains valid it is returned immediately. Once its
@@ -200,7 +209,7 @@ export class ElastiCacheIAMAuthTokenManager {
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (this.closed) {
-        throw lastError;
+        throw new TokenRefreshError(CLOSED_MESSAGE, { cause: lastError });
       }
       try {
         const issuedAt = this.now();
@@ -209,6 +218,9 @@ export class ElastiCacheIAMAuthTokenManager {
         return token;
       } catch (error) {
         lastError = error;
+        if (this.closed) {
+          throw new TokenRefreshError(CLOSED_MESSAGE, { cause: error });
+        }
         if (attempt === MAX_ATTEMPTS) {
           break;
         }
@@ -217,7 +229,7 @@ export class ElastiCacheIAMAuthTokenManager {
     }
 
     const cached = this.cached;
-    
+
     // If a cached token is still valid, return it and schedule another refresh. If
     // there is no cached token, throw the last error. If there is a cached token
     // but it has expired, throw a TokenRefreshError with the last error as its
@@ -248,7 +260,7 @@ export class ElastiCacheIAMAuthTokenManager {
       return;
     }
     try {
-      this.onTokenChanged(token);
+      void Promise.resolve(this.onTokenChanged(token)).catch(() => {});
     } catch {
       // A consumer's callback failure must not invalidate a token that was
       // minted successfully, and must not trigger another mint.
