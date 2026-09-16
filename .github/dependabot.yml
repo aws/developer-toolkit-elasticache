@@ -57,3 +57,12 @@ updates:
     groups:
       java-examples:
         patterns: ["*"]
+
+  # Standalone Java installed-artifact integration test dependencies and plugins.
+  - package-ecosystem: maven
+    directory: /java/integration-tests
+    schedule:
+      interval: weekly
+    groups:
+      java-integration-tests:
+        patterns: ["*"]
