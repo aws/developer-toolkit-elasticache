@@ -214,6 +214,9 @@ export class ElastiCacheIAMAuthTokenManager {
       try {
         const issuedAt = this.now();
         const token = await this.provider.getToken();
+        if (this.closed) {
+          throw new TokenRefreshError(CLOSED_MESSAGE);
+        }
         this.install(token, issuedAt);
         return token;
       } catch (error) {

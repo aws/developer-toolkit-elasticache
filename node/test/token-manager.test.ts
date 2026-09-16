@@ -347,6 +347,39 @@ test("close prevents retry when an in-flight mint fails", async () => {
   assert.equal(clock.created.length, 0);
 });
 
+test("close discards a successful in-flight mint", async () => {
+  const clock = new TestClock();
+  let resolveCredentials!: (credentials: typeof CREDENTIALS) => void;
+  const credentials = new Promise<typeof CREDENTIALS>((resolve) => {
+    resolveCredentials = resolve;
+  });
+  const changedTokens: string[] = [];
+  const manager = new ElastiCacheIAMAuthTokenManager(
+    {
+      serverlessCacheName: CACHE,
+      userId: USER,
+      region: REGION,
+      onTokenChanged: (token) => changedTokens.push(token),
+    },
+    {
+      credentialProvider: () => credentials,
+      signingDate: SIGNING_DATE,
+      now: clock.now,
+      random: () => 0.5,
+      scheduler: clock.scheduler,
+    },
+  );
+  const result = manager.getToken();
+  await flush();
+  manager.close();
+
+  const rejection = assert.rejects(result, TokenRefreshError);
+  resolveCredentials(CREDENTIALS);
+  await rejection;
+  assert.deepEqual(changedTokens, []);
+  assert.equal(clock.created.length, 0);
+});
+
 for (const refreshAfterSeconds of [0, -1, 900, Number.NaN, Number.POSITIVE_INFINITY]) {
   test(`rejects invalid refreshAfterSeconds ${String(refreshAfterSeconds)}`, () => {
     assert.throws(
