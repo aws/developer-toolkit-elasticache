@@ -4,6 +4,6 @@
  */
 
 /**
- * IAM authentication token generation for Amazon ElastiCache.
+ * IAM authentication token generation, caching, and refresh for Amazon ElastiCache.
  */
 package software.amazon.elasticache.auth;

@@ -39,7 +39,7 @@ public final class ElastiCacheIamAuthTokenProvider {
     private static final String URL_SCHEME_PREFIX = "https://";
     private static final String SERVICE_NAME = "elasticache";
     private static final String AWS_REGION_ENV_VAR = "AWS_REGION";
-    private static final Duration TOKEN_TTL = Duration.ofSeconds(900);
+    static final Duration TOKEN_TTL = Duration.ofSeconds(900);
     private static final Pattern CACHE_NAME_PATTERN =
             Pattern.compile("^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$");
     private static final Pattern USER_ID_PATTERN =

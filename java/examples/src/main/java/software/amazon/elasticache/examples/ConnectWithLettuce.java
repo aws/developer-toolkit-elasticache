@@ -11,7 +11,7 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.regions.Region;
-import software.amazon.elasticache.auth.ElastiCacheIamAuthTokenProvider;
+import software.amazon.elasticache.auth.ElastiCacheIamAuthTokenManager;
 
 /**
  * Connects to an ElastiCache serverless cache with Lettuce and IAM authentication.
@@ -39,7 +39,7 @@ public final class ConnectWithLettuce {
         Region region = Region.of(args[3]);
         int port = args.length == 5 ? Integer.parseInt(args[4]) : DEFAULT_PORT;
 
-        ElastiCacheIamAuthTokenProvider auth = ElastiCacheIamAuthTokenProvider.builder()
+        ElastiCacheIamAuthTokenManager auth = ElastiCacheIamAuthTokenManager.builder()
                 .serverlessCacheName(cacheName)
                 .userId(userId)
                 .region(region)
@@ -48,8 +48,12 @@ public final class ConnectWithLettuce {
         RedisCredentialsProvider credentialsProvider = new RedisCredentialsProvider() {
             @Override
             public Mono<RedisCredentials> resolveCredentials() {
-                return Mono.fromSupplier(
-                        () -> RedisCredentials.just(auth.getUserId(), auth.getToken()));
+                return Mono.fromSupplier(() -> {
+                    ElastiCacheIamAuthTokenManager.Credentials credentials =
+                            auth.getCredentials();
+                    return RedisCredentials.just(
+                            credentials.getUserId(), credentials.getToken());
+                });
             }
         };
         RedisURI redisUri = RedisURI.Builder.redis(endpoint, port)
@@ -68,6 +72,7 @@ public final class ConnectWithLettuce {
                 connection.close();
             }
             client.shutdown();
+            auth.close();
         }
     }
 }
