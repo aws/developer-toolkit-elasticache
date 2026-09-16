@@ -15,6 +15,11 @@ and this package uses [Semantic Versioning](https://semver.org/).
   typed user-correctable errors, and deterministic SigV4 signing tests.
 - Credential providers that fail or return unusable credentials are normalized to
   an actionable `ConfigurationException`.
+- `ElastiCacheIamAuthTokenManager` for caching tokens, refreshing them in the
+  background before expiry, retrying transient failures, and notifying a
+  token-change callback.
+- `TokenRefreshException` for closed managers and refreshes that cannot replace
+  an expired token.
 - Maven build, Java version CI matrix, documentation, and dependency updates.
 
 ### Notes
