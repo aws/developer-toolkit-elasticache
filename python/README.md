@@ -69,6 +69,10 @@ The chain is checked in this order:
 3. Container credentials (Amazon ECS / EKS).
 4. EC2 instance profile credentials (IMDS).
 
+Missing credentials are reported when a token is requested. Expired or otherwise
+invalid credentials cannot be detected during local signing: token generation can
+succeed, but ElastiCache will reject the token when the client connects.
+
 ### Reconnecting clients
 
 Clients such as redis-py and valkey-py request credentials on every reconnection.
