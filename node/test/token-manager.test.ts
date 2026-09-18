@@ -247,7 +247,9 @@ test("keeps serving a valid token while refresh credentials are unavailable", as
 
     assert.equal(clock.created.at(-1)?.delayMs, 5_000);
     assert.equal(await manager.getToken(), token);
-    assert.equal(credentialCalls(), 10);
+    // The cooldown scheduled above is still pending, so this call must not
+    // start a redundant, concurrent refresh cycle of its own.
+    assert.equal(credentialCalls(), 9);
 
     succeed();
     await clock.advance(5_000);
@@ -258,7 +260,7 @@ test("keeps serving a valid token while refresh credentials are unavailable", as
 });
 
 test("throws TokenRefreshError after the cached token expires", async () => {
-  const { clock, manager, fail } = harness({ refreshAfterSeconds: 899 });
+  const { clock, manager, fail } = harness({ refreshAfterSeconds: 879 });
   try {
     await manager.getToken();
     fail();
@@ -380,7 +382,15 @@ test("close discards a successful in-flight mint", async () => {
   assert.equal(clock.created.length, 0);
 });
 
-for (const refreshAfterSeconds of [0, -1, 900, Number.NaN, Number.POSITIVE_INFINITY]) {
+for (const refreshAfterSeconds of [
+  0,
+  -1,
+  880,
+  899,
+  900,
+  Number.NaN,
+  Number.POSITIVE_INFINITY,
+]) {
   test(`rejects invalid refreshAfterSeconds ${String(refreshAfterSeconds)}`, () => {
     assert.throws(
       () =>
@@ -394,3 +404,200 @@ for (const refreshAfterSeconds of [0, -1, 900, Number.NaN, Number.POSITIVE_INFIN
     );
   });
 }
+
+test("accepts a refreshAfterSeconds just below the effective token lifetime", () => {
+  assert.doesNotThrow(() =>
+    new ElastiCacheIAMAuthTokenManager({
+      serverlessCacheName: CACHE,
+      userId: USER,
+      region: REGION,
+      refreshAfterSeconds: 879,
+    }).close(),
+  );
+});
+
+test("treats a cached token as expired at the 880 second margin, not the raw 900 second lifetime", async () => {
+  const { clock, manager, fail } = harness({ refreshAfterSeconds: 879 });
+  try {
+    await manager.getToken();
+    fail();
+    // The background cycle started at refreshAt (879s) exhausts its 8 attempts
+    // shortly after 890s: past the 880s effective expiry, but short of the raw
+    // 900s token lifetime. Under the raw lifetime this would still be "valid"
+    // and the cycle would fall back to serving the stale token instead.
+    await clock.advance(891_000);
+
+    const result = manager.getToken().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await flush();
+    await clock.advance(12_000);
+
+    assert.ok((await result) instanceof TokenRefreshError);
+  } finally {
+    manager.close();
+  }
+});
+
+test("does not start a second refresh cycle while one is scheduled during cooldown", async () => {
+  const { clock, manager, credentialCalls, fail, succeed } = harness();
+  try {
+    const token = await manager.getToken();
+    fail();
+    // Run the first refresh cycle to exhaustion; it falls back to serving the
+    // still-valid cached token and schedules a retry after MAX_DELAY_MS.
+    await clock.advance(311_300);
+    const callsAfterFirstCycle = credentialCalls();
+    assert.equal(clock.created.at(-1)?.delayMs, 5_000);
+
+    // Many concurrent reconnect-storm callers hit the cooldown window before
+    // the scheduled retry fires. None of them should start another cycle.
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => manager.getToken()),
+    );
+    assert.equal(
+      results.every((result) => result === token),
+      true,
+    );
+    assert.equal(credentialCalls(), callsAfterFirstCycle);
+
+    succeed();
+    await clock.advance(5_000);
+    assert.notEqual(await manager.getToken(), token);
+  } finally {
+    manager.close();
+  }
+});
+
+test("refreshToken forces a new token ahead of the scheduled refresh", async () => {
+  const { manager, credentialCalls, changedTokens } = harness();
+  try {
+    const first = await manager.getToken();
+    const second = await manager.refreshToken();
+
+    assert.notEqual(second, first);
+    assert.equal(await manager.getToken(), second);
+    assert.equal(credentialCalls(), 2);
+    assert.deepEqual(changedTokens, [first, second]);
+  } finally {
+    manager.close();
+  }
+});
+
+test("refreshToken shares one mint across concurrent callers", async () => {
+  const { manager, credentialCalls } = harness();
+  try {
+    await manager.getToken();
+    const [first, second, third] = await Promise.all([
+      manager.refreshToken(),
+      manager.refreshToken(),
+      manager.refreshToken(),
+    ]);
+
+    assert.equal(first, second);
+    assert.equal(second, third);
+    assert.equal(credentialCalls(), 2);
+  } finally {
+    manager.close();
+  }
+});
+
+test("refreshToken joins an already in-flight background refresh", async () => {
+  const { clock, manager, credentialCalls } = harness();
+  try {
+    const first = await manager.getToken();
+    // Cross refreshAt without going through clock.advance()'s timer-firing loop,
+    // so the background cycle it starts is still in flight below.
+    clock.time = 300_000;
+    const background = manager.getToken();
+    const forced = manager.refreshToken();
+    const [backgroundToken, forcedToken] = await Promise.all([background, forced]);
+
+    assert.equal(backgroundToken, first);
+    assert.notEqual(forcedToken, first);
+    assert.equal(credentialCalls(), 2);
+    assert.equal(await manager.getToken(), forcedToken);
+  } finally {
+    manager.close();
+  }
+});
+
+test("refreshToken invalidates the cache while joining a failing background refresh", async () => {
+  const { clock, manager, credentialCalls, fail } = harness();
+  try {
+    const token = await manager.getToken();
+    fail();
+    clock.time = 300_000;
+
+    const backgroundToken = manager.getToken();
+    const forcedResult = manager.refreshToken().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const concurrentResult = manager.getToken().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    assert.equal(await backgroundToken, token);
+    await flush();
+    await clock.advance(12_000);
+
+    assert.ok((await forcedResult) instanceof Error);
+    assert.ok((await concurrentResult) instanceof Error);
+    assert.equal(credentialCalls(), 9);
+  } finally {
+    manager.close();
+  }
+});
+
+test("refreshToken rejects without a cached token when every attempt fails", async () => {
+  const { clock, manager, fail } = harness();
+  fail();
+
+  const result = manager.refreshToken().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await flush();
+  await clock.advance(12_000);
+
+  assert.equal((await result) instanceof Error, true);
+  manager.close();
+});
+
+test("refreshToken rejects after close", async () => {
+  const { manager } = harness();
+  manager.close();
+  await assert.rejects(() => manager.refreshToken(), TokenRefreshError);
+});
+
+test("close aborts an in-flight refreshToken call", async () => {
+  const clock = new TestClock();
+  let resolveCredentials!: (credentials: typeof CREDENTIALS) => void;
+  const credentials = new Promise<typeof CREDENTIALS>((resolve) => {
+    resolveCredentials = resolve;
+  });
+  const manager = new ElastiCacheIAMAuthTokenManager(
+    {
+      serverlessCacheName: CACHE,
+      userId: USER,
+      region: REGION,
+    },
+    {
+      credentialProvider: () => credentials,
+      signingDate: SIGNING_DATE,
+      now: clock.now,
+      random: () => 0.5,
+      scheduler: clock.scheduler,
+    },
+  );
+  const result = manager.refreshToken();
+  await flush();
+  manager.close();
+
+  const rejection = assert.rejects(result, TokenRefreshError);
+  resolveCredentials(CREDENTIALS);
+  await rejection;
+});

@@ -14,6 +14,14 @@ const BASE_DELAY_MS = 100;
 const MAX_DELAY_MS = 5_000;
 const JITTER_RATIO = 0.2;
 
+// ElastiCache tokens are valid for TOKEN_TTL_SECONDS from issuance, but clock
+// skew and in-flight requests mean a token accepted at signing time can be
+// rejected by the time it reaches the server. Serve tokens for a shorter,
+// effective lifetime so a cached token is never handed out right at the edge
+// of the real expiry.
+const SERVE_MARGIN_SECONDS = 20;
+const EFFECTIVE_TOKEN_LIFETIME_SECONDS = TOKEN_TTL_SECONDS - SERVE_MARGIN_SECONDS;
+
 const CLOSED_MESSAGE = "The token manager is closed.";
 const REFRESH_FAILED_MESSAGE =
   "Could not refresh the ElastiCache IAM authentication token before the " +
@@ -33,7 +41,8 @@ export interface TokenManagerScheduler {
 export interface TokenManagerOptions extends TokenGeneratorOptions {
   /**
    * Seconds after issuance at which a token is refreshed in the background.
-   * Must be greater than 0 and less than the 900 second token lifetime.
+   * Must be greater than 0 and less than the effective token lifetime (the
+   * 900 second token lifetime minus a 20 second serve margin, i.e. 880).
    * Defaults to 300.
    */
   refreshAfterSeconds?: number;
@@ -79,11 +88,11 @@ function resolveRefreshAfterSeconds(value: unknown): number {
     typeof resolved !== "number" ||
     !Number.isFinite(resolved) ||
     resolved <= 0 ||
-    resolved >= TOKEN_TTL_SECONDS
+    resolved >= EFFECTIVE_TOKEN_LIFETIME_SECONDS
   ) {
     throw new InvalidParameterError(
       "Invalid value for parameter 'refreshAfterSeconds': must be greater than 0 " +
-        `and less than ${TOKEN_TTL_SECONDS}.`,
+        `and less than ${EFFECTIVE_TOKEN_LIFETIME_SECONDS}.`,
     );
   }
   return resolved;
@@ -110,6 +119,13 @@ export class ElastiCacheIAMAuthTokenManager {
   private retryTimer?: TokenManagerTimer;
   private cancelSleep?: () => void;
   private closed = false;
+  /**
+   * When set, `getToken()` serves the cached token without starting another
+   * refresh cycle until this time: a refresh cycle is already scheduled to
+   * retry, and starting a second one would duplicate that work. Cleared by a
+   * successful refresh.
+   */
+  private retryNotBefore?: number;
 
   constructor(options: TokenManagerOptions, dependencies: TokenManagerDependencies = {}) {
     this.provider = new ElastiCacheIAMAuthTokenProvider(options, dependencies);
@@ -163,11 +179,31 @@ export class ElastiCacheIAMAuthTokenManager {
 
     const cached = this.cached;
     if (cached && this.now() < cached.expiresAt) {
-      if (this.now() >= cached.refreshAt) {
+      if (this.now() >= cached.refreshAt && !this.inRetryCooldown()) {
         this.startBackgroundRefresh();
       }
       return cached.token;
     }
+    return this.refresh();
+  }
+
+  /**
+   * Force a new token, invalidating the cached one instead of waiting for the
+   * next scheduled background refresh.
+   *
+   * A refresh already in progress, whether started here or in the background,
+   * is shared: concurrent callers wait for the same replacement token.
+   *
+   * @throws {TokenRefreshError} when the manager is closed.
+   * @throws {ConfigurationError} when no usable AWS credentials can be resolved.
+   */
+  async refreshToken(): Promise<string> {
+    if (this.closed) {
+      throw new TokenRefreshError(CLOSED_MESSAGE);
+    }
+    this.cached = undefined;
+    this.clearRefreshTimer();
+    this.retryNotBefore = undefined;
     return this.refresh();
   }
 
@@ -238,6 +274,7 @@ export class ElastiCacheIAMAuthTokenManager {
     // but it has expired, throw a TokenRefreshError with the last error as its
     // cause.
     if (cached && this.now() < cached.expiresAt) {
+      this.retryNotBefore = this.now() + MAX_DELAY_MS;
       this.scheduleRefresh(MAX_DELAY_MS);
       return cached.token;
     }
@@ -252,10 +289,15 @@ export class ElastiCacheIAMAuthTokenManager {
       token,
       issuedAt,
       refreshAt: issuedAt + this.refreshAfterMs,
-      expiresAt: issuedAt + TOKEN_TTL_SECONDS * 1000,
+      expiresAt: issuedAt + EFFECTIVE_TOKEN_LIFETIME_SECONDS * 1000,
     };
+    this.retryNotBefore = undefined;
     this.scheduleRefresh(this.refreshAfterMs);
     this.notify(token);
+  }
+
+  private inRetryCooldown(): boolean {
+    return this.retryNotBefore !== undefined && this.now() < this.retryNotBefore;
   }
 
   private notify(token: string): void {
