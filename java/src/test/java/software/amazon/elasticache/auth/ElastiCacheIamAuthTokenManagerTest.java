@@ -179,6 +179,72 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
+    void initialErrorClearsInFlightAndAllowsRetry() {
+        TestScheduler scheduler = new TestScheduler();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        AtomicBoolean throwError = new AtomicBoolean(true);
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    credentialCalls.incrementAndGet();
+                    if (throwError.getAndSet(false)) {
+                        throw new AssertionError("fatal credential provider failure");
+                    }
+                    return FIRST_CREDENTIALS;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .build();
+        try {
+            assertThrows(AssertionError.class, manager::getToken);
+
+            assertFalse(manager.getToken().isEmpty());
+            assertEquals(2, credentialCalls.get());
+        } finally {
+            manager.close();
+        }
+    }
+
+    @Test
+    void backgroundErrorClearsInFlightAndAllowsLaterRefresh() {
+        TestScheduler scheduler = new TestScheduler();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        AtomicBoolean throwError = new AtomicBoolean();
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    int call = credentialCalls.incrementAndGet();
+                    if (throwError.get()) {
+                        throw new AssertionError("fatal credential provider failure");
+                    }
+                    return call == 1 ? FIRST_CREDENTIALS : ROTATED_CREDENTIALS;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .build();
+        try {
+            String first = manager.getToken();
+            throwError.set(true);
+
+            assertThrows(AssertionError.class, () -> scheduler.advance(300_000));
+
+            throwError.set(false);
+            assertEquals(first, manager.getToken());
+            scheduler.advance(0);
+            assertNotEquals(first, manager.getToken());
+            assertEquals(3, credentialCalls.get());
+        } finally {
+            manager.close();
+        }
+    }
+
+    @Test
     void servesValidTokenWhileRefreshFailsAndRecovers() {
         Harness harness = new Harness();
         try {

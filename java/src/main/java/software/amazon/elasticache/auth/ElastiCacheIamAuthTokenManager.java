@@ -226,7 +226,14 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             }
             install(token, issuedAt);
             refresh.complete(token);
-        } catch (RuntimeException exception) {
+        } catch (Throwable failure) {
+            if (failure instanceof Error) {
+                refresh.completeExceptionally(failure);
+                throw (Error) failure;
+            }
+            RuntimeException exception = failure instanceof RuntimeException
+                    ? (RuntimeException) failure
+                    : new RuntimeException(failure);
             synchronized (lock) {
                 if (closed) {
                     refresh.completeExceptionally(
