@@ -7,6 +7,7 @@ package software.amazon.elasticache.auth;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -114,10 +118,11 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
-    void sharesInitialTokenGenerationAcrossConcurrentCallers() throws InterruptedException {
+    void sharesInitialTokenGenerationAcrossConcurrentCallers() {
         TestScheduler scheduler = new TestScheduler();
         AtomicInteger credentialCalls = new AtomicInteger();
         CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch shared = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
                 .serverlessCacheName(CACHE)
@@ -127,7 +132,9 @@ class ElastiCacheIamAuthTokenManagerTest {
                     credentialCalls.incrementAndGet();
                     entered.countDown();
                     try {
-                        release.await();
+                        if (!release.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("timed out waiting to release provider");
+                        }
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
                         throw new IllegalStateException(exception);
@@ -137,13 +144,15 @@ class ElastiCacheIamAuthTokenManagerTest {
                 .signingClock(SIGNING_CLOCK)
                 .currentTimeMillis(scheduler::now)
                 .scheduler(scheduler)
+                .onSharedRefresh(shared::countDown)
                 .build();
         try {
             CompletableFuture<String> first =
                     CompletableFuture.supplyAsync(manager::getToken);
-            entered.await();
+            await(entered);
             CompletableFuture<String> second =
                     CompletableFuture.supplyAsync(manager::getToken);
+            await(shared);
             release.countDown();
 
             assertEquals(first.join(), second.join());
@@ -209,6 +218,51 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
+    void waitingCallerReceivesOriginalErrorFromSharedRefresh() {
+        TestScheduler scheduler = new TestScheduler();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch shared = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AssertionError failure = new AssertionError("fatal credential provider failure");
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    entered.countDown();
+                    try {
+                        if (!release.await(5, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("timed out waiting to release provider");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(exception);
+                    }
+                    throw failure;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .onSharedRefresh(shared::countDown)
+                .build();
+        try {
+            CompletableFuture<Throwable> first =
+                    CompletableFuture.supplyAsync(() -> captureFailure(manager::getToken));
+            await(entered);
+            CompletableFuture<Throwable> second =
+                    CompletableFuture.supplyAsync(() -> captureFailure(manager::getToken));
+            await(shared);
+            release.countDown();
+
+            assertSame(failure, first.join());
+            assertSame(failure, second.join());
+        } finally {
+            release.countDown();
+            manager.close();
+        }
+    }
+
+    @Test
     void backgroundErrorClearsInFlightAndAllowsLaterRefresh() {
         TestScheduler scheduler = new TestScheduler();
         AtomicInteger credentialCalls = new AtomicInteger();
@@ -253,11 +307,14 @@ class ElastiCacheIamAuthTokenManagerTest {
             harness.scheduler.advance(312_000);
 
             assertEquals(5_000, harness.scheduler.lastCreated().delayMillis);
+            int tasksAfterFailure = harness.scheduler.createdCount();
+            assertEquals(token, harness.manager.getToken());
             assertEquals(token, harness.manager.getToken());
             assertEquals(9, harness.credentialCalls.get());
+            assertEquals(tasksAfterFailure, harness.scheduler.createdCount());
 
             harness.failing.set(false);
-            harness.scheduler.advance(0);
+            harness.scheduler.advance(5_000);
             assertNotEquals(token, harness.manager.getToken());
         } finally {
             harness.manager.close();
@@ -265,12 +322,14 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
-    void throwsRefreshExceptionAfterCachedTokenExpires() {
-        Harness harness = new Harness(Duration.ofSeconds(899), null);
+    void treatsTokenAsExpiredAtEffectiveLifetime() {
+        Harness harness = new Harness(Duration.ofSeconds(879), null);
         try {
             harness.manager.getToken();
             harness.failing.set(true);
-            harness.scheduler.advance(911_000);
+            // The first failed cycle ends after the 880-second effective expiry
+            // but before the raw 900-second token expiry.
+            harness.scheduler.advance(891_000);
 
             CompletableFuture<Throwable> result = CompletableFuture.supplyAsync(() -> {
                 try {
@@ -308,6 +367,37 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
+    void blockingTokenChangedCallbackDoesNotDelayTokenCaller() throws Exception {
+        TestScheduler scheduler = new TestScheduler();
+        CountDownLatch callbackEntered = new CountDownLatch(1);
+        CountDownLatch releaseCallback = new CountDownLatch(1);
+        ExecutorService callbackExecutor = Executors.newSingleThreadExecutor();
+        ElastiCacheIamAuthTokenManager manager =
+                baseBuilder(scheduler, new AtomicInteger(), new AtomicBoolean())
+                        .callbackExecutor(callbackExecutor)
+                        .onTokenChanged(token -> {
+                            callbackEntered.countDown();
+                            try {
+                                releaseCallback.await();
+                            } catch (InterruptedException exception) {
+                                Thread.currentThread().interrupt();
+                            }
+                        })
+                        .build();
+        try {
+            CompletableFuture<String> token =
+                    CompletableFuture.supplyAsync(manager::getToken);
+
+            await(callbackEntered);
+            assertFalse(token.get(5, TimeUnit.SECONDS).isEmpty());
+        } finally {
+            releaseCallback.countDown();
+            manager.close();
+            callbackExecutor.shutdownNow();
+        }
+    }
+
+    @Test
     void closeCancelsBackgroundWorkAndRejectsRequests() {
         Harness harness = new Harness();
         harness.manager.getToken();
@@ -319,7 +409,7 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
-    void closePreventsRetryWhenInFlightGenerationFails() throws InterruptedException {
+    void closePreventsRetryWhenInFlightGenerationFails() {
         TestScheduler scheduler = new TestScheduler();
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -329,11 +419,7 @@ class ElastiCacheIamAuthTokenManagerTest {
                 .region(Region.US_EAST_1)
                 .credentialsProvider(() -> {
                     entered.countDown();
-                    try {
-                        release.await();
-                    } catch (InterruptedException exception) {
-                        Thread.currentThread().interrupt();
-                    }
+                    await(release);
                     throw new IllegalStateException("credential chain failed");
                 })
                 .signingClock(SIGNING_CLOCK)
@@ -349,11 +435,46 @@ class ElastiCacheIamAuthTokenManagerTest {
                 return exception;
             }
         });
-        entered.await();
+        await(entered);
         manager.close();
         release.countDown();
 
-        assertTrue(result.join() instanceof TokenRefreshException);
+        Throwable failure = result.join();
+        assertTrue(failure instanceof TokenRefreshException);
+        assertEquals(
+                "Token refresh was cancelled because the token manager was closed.",
+                failure.getMessage());
+        assertEquals(0, scheduler.createdCount());
+    }
+
+    @Test
+    void closeAfterSigningPreventsTokenInstallationAndNotification() {
+        TestScheduler scheduler = new TestScheduler();
+        List<String> changedTokens = new ArrayList<>();
+        CountDownLatch signed = new CountDownLatch(1);
+        CountDownLatch install = new CountDownLatch(1);
+        ElastiCacheIamAuthTokenManager manager =
+                baseBuilder(scheduler, new AtomicInteger(), new AtomicBoolean())
+                        .callbackExecutor(Runnable::run)
+                        .onTokenChanged(changedTokens::add)
+                        .beforeInstall(() -> {
+                            signed.countDown();
+                            await(install);
+                        })
+                        .build();
+        CompletableFuture<Throwable> result =
+                CompletableFuture.supplyAsync(() -> captureFailure(manager::getToken));
+
+        await(signed);
+        manager.close();
+        install.countDown();
+
+        Throwable failure = result.join();
+        assertTrue(failure instanceof TokenRefreshException);
+        assertEquals(
+                "Token refresh was cancelled because the token manager was closed.",
+                failure.getMessage());
+        assertTrue(changedTokens.isEmpty());
         assertEquals(0, scheduler.createdCount());
     }
 
@@ -363,6 +484,8 @@ class ElastiCacheIamAuthTokenManagerTest {
                 Duration.ZERO,
                 Duration.ofMillis(-1),
                 Duration.ofNanos(1),
+                Duration.ofSeconds(880),
+                Duration.ofSeconds(899),
                 Duration.ofMinutes(15),
                 Duration.ofMinutes(16))) {
             assertThrows(
@@ -371,6 +494,12 @@ class ElastiCacheIamAuthTokenManagerTest {
                             .refreshAfter(value)
                             .build());
         }
+
+        ElastiCacheIamAuthTokenManager manager =
+                baseBuilder(new TestScheduler(), new AtomicInteger(), new AtomicBoolean())
+                        .refreshAfter(Duration.ofSeconds(879))
+                        .build();
+        manager.close();
     }
 
     @Test
@@ -396,15 +525,33 @@ class ElastiCacheIamAuthTokenManagerTest {
                 .signingClock(SIGNING_CLOCK)
                 .currentTimeMillis(scheduler::now)
                 .random(() -> 0.5)
-                .scheduler(scheduler);
+                .scheduler(scheduler)
+                .callbackExecutor(Runnable::run);
     }
 
     private static void awaitCreatedTasks(TestScheduler scheduler, int expected) {
-        for (int attempt = 0; attempt < 10_000
-                && scheduler.createdCount() < expected; attempt++) {
-            Thread.yield();
-        }
+        assertTrue(
+                scheduler.awaitCreatedCount(expected, 5, TimeUnit.SECONDS),
+                "timed out waiting for scheduled tasks");
         assertEquals(expected, scheduler.createdCount());
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(5, TimeUnit.SECONDS), "timed out waiting for latch");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for latch", exception);
+        }
+    }
+
+    private static Throwable captureFailure(Runnable action) {
+        try {
+            action.run();
+            return null;
+        } catch (Throwable failure) {
+            return failure;
+        }
     }
 
     private static final class Harness {
@@ -451,6 +598,7 @@ class ElastiCacheIamAuthTokenManagerTest {
             TestTask scheduled = new TestTask(time + delayMillis, delayMillis, task);
             pending.add(scheduled);
             created.add(scheduled);
+            notifyAll();
             return scheduled;
         }
 
@@ -488,6 +636,22 @@ class ElastiCacheIamAuthTokenManagerTest {
 
         private synchronized int createdCount() {
             return created.size();
+        }
+
+        private synchronized boolean awaitCreatedCount(
+                int expected, long timeout, TimeUnit unit) {
+            long remainingNanos = unit.toNanos(timeout);
+            long deadline = System.nanoTime() + remainingNanos;
+            while (created.size() < expected && remainingNanos > 0) {
+                try {
+                    TimeUnit.NANOSECONDS.timedWait(this, remainingNanos);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                remainingNanos = deadline - System.nanoTime();
+            }
+            return created.size() >= expected;
         }
     }
 

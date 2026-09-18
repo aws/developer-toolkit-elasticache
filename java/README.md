@@ -107,7 +107,10 @@ try (ElastiCacheIamAuthTokenManager auth =
 The first token is generated lazily. Concurrent callers share one initial token
 generation, and subsequent calls return the cached token while it is valid.
 Refresh starts after 5 minutes by default; `refreshAfter(...)` accepts values from
-1 millisecond up to, but not including, the 15-minute token lifetime.
+1 millisecond up to, but not including, 14 minutes 40 seconds. The manager reserves
+the final 20 seconds of the service's 15-minute token lifetime for clock skew and
+in-transit reconnects. Token-change callbacks run asynchronously after the new
+token is available to callers.
 
 A refresh makes up to 8 attempts with jittered exponential backoff capped at 5
 seconds. If refresh fails while the cached token is still valid, callers continue

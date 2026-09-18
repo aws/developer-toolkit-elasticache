@@ -9,7 +9,9 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -21,8 +23,10 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.AwsRegionProvider;
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 
 /**
  * Caches an ElastiCache IAM authentication token and refreshes it before expiry.
@@ -39,7 +43,12 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     private static final long BASE_DELAY_MILLIS = 100;
     private static final long MAX_DELAY_MILLIS = 5_000;
     private static final double JITTER_RATIO = 0.2;
+    private static final Duration TOKEN_SERVE_MARGIN = Duration.ofSeconds(20);
+    private static final Duration EFFECTIVE_TOKEN_LIFETIME =
+            ElastiCacheIamAuthTokenProvider.TOKEN_TTL.minus(TOKEN_SERVE_MARGIN);
     private static final String CLOSED_MESSAGE = "The token manager is closed.";
+    private static final String REFRESH_CANCELLED_MESSAGE =
+            "Token refresh was cancelled because the token manager was closed.";
     private static final String REFRESH_FAILED_MESSAGE =
             "Could not refresh the ElastiCache IAM authentication token before "
                     + "the previous token expired.";
@@ -48,15 +57,19 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     private final ElastiCacheIamAuthTokenProvider provider;
     private final long refreshAfterMillis;
     private final Consumer<String> onTokenChanged;
+    private final Executor callbackExecutor;
     private final LongSupplier currentTimeMillis;
     private final DoubleSupplier random;
     private final Scheduler scheduler;
     private final boolean ownsScheduler;
+    private final Runnable beforeInstall;
+    private final Runnable onSharedRefresh;
 
     private CachedToken cached;
     private CompletableFuture<String> inFlight;
     private Cancellable refreshTask;
     private Cancellable retryTask;
+    private long retryNotBefore;
     private boolean closed;
 
     private ElastiCacheIamAuthTokenManager(Builder builder) {
@@ -66,16 +79,13 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
                 .serverlessCacheName(builder.serverlessCacheName)
                 .replicationGroupId(builder.replicationGroupId)
                 .credentialsProvider(builder.credentialsProvider == null
-                        ? software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider
-                                .builder()
-                                .build()
+                        ? DefaultCredentialsProvider.builder().build()
                         : builder.credentialsProvider)
                 .awsRegionEnvironmentProvider(builder.awsRegionEnvironmentProvider == null
                         ? () -> System.getenv("AWS_REGION")
                         : builder.awsRegionEnvironmentProvider)
                 .regionProvider(builder.regionProvider == null
-                        ? software.amazon.awssdk.regions.providers
-                                .DefaultAwsRegionProviderChain.builder().build()
+                        ? DefaultAwsRegionProviderChain.builder().build()
                         : builder.regionProvider)
                 .signingClock(builder.signingClock == null
                         ? Clock.systemUTC()
@@ -83,10 +93,15 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
                 .build();
         this.refreshAfterMillis = resolveRefreshAfterMillis(builder.refreshAfter);
         this.onTokenChanged = builder.onTokenChanged;
+        this.callbackExecutor = builder.callbackExecutor == null
+                ? ForkJoinPool.commonPool()
+                : builder.callbackExecutor;
         this.currentTimeMillis = builder.currentTimeMillis == null
                 ? System::currentTimeMillis
                 : builder.currentTimeMillis;
         this.random = builder.random == null ? Math::random : builder.random;
+        this.beforeInstall = builder.beforeInstall;
+        this.onSharedRefresh = builder.onSharedRefresh;
         if (builder.scheduler == null) {
             this.scheduler = new DefaultScheduler();
             this.ownsScheduler = true;
@@ -139,7 +154,7 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             long now = currentTimeMillis.getAsLong();
             if (cached != null && now < cached.expiresAt) {
                 String token = cached.token;
-                if (now >= cached.refreshAt) {
+                if (now >= cached.refreshAt && now >= retryNotBefore) {
                     scheduleRefreshLocked(0);
                 }
                 return token;
@@ -168,7 +183,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             pending = inFlight;
         }
         if (pending != null) {
-            pending.completeExceptionally(new TokenRefreshException(CLOSED_MESSAGE));
+            pending.completeExceptionally(
+                    new TokenRefreshException(REFRESH_CANCELLED_MESSAGE));
         }
         if (ownsScheduler) {
             scheduler.close();
@@ -180,6 +196,9 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         synchronized (lock) {
             ensureOpen();
             if (inFlight != null) {
+                if (onSharedRefresh != null) {
+                    onSharedRefresh.run();
+                }
                 return inFlight;
             }
             refresh = new CompletableFuture<>();
@@ -209,7 +228,7 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         synchronized (lock) {
             if (closed) {
                 refresh.completeExceptionally(new TokenRefreshException(
-                        CLOSED_MESSAGE, lastError));
+                        REFRESH_CANCELLED_MESSAGE, lastError));
                 return;
             }
             retryTask = null;
@@ -218,14 +237,10 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         try {
             long issuedAt = currentTimeMillis.getAsLong();
             String token = provider.getToken();
-            synchronized (lock) {
-                if (closed) {
-                    refresh.completeExceptionally(new TokenRefreshException(CLOSED_MESSAGE));
-                    return;
-                }
+            if (beforeInstall != null) {
+                beforeInstall.run();
             }
-            install(token, issuedAt);
-            refresh.complete(token);
+            installAndComplete(refresh, token, issuedAt);
         } catch (Throwable failure) {
             if (failure instanceof Error) {
                 refresh.completeExceptionally(failure);
@@ -237,7 +252,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             synchronized (lock) {
                 if (closed) {
                     refresh.completeExceptionally(
-                            new TokenRefreshException(CLOSED_MESSAGE, exception));
+                            new TokenRefreshException(
+                                    REFRESH_CANCELLED_MESSAGE, exception));
                     return;
                 }
             }
@@ -261,14 +277,15 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
                 if (closed) {
                     task.cancel();
                     refresh.completeExceptionally(
-                            new TokenRefreshException(CLOSED_MESSAGE, lastError));
+                            new TokenRefreshException(
+                                    REFRESH_CANCELLED_MESSAGE, lastError));
                 } else {
                     retryTask = task;
                 }
             }
         } catch (RejectedExecutionException exception) {
             refresh.completeExceptionally(
-                    new TokenRefreshException(CLOSED_MESSAGE, lastError));
+                    new TokenRefreshException(REFRESH_CANCELLED_MESSAGE, lastError));
         }
     }
 
@@ -279,6 +296,7 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             long now = currentTimeMillis.getAsLong();
             if (cached != null && now < cached.expiresAt) {
                 validToken = cached.token;
+                retryNotBefore = now + MAX_DELAY_MILLIS;
                 scheduleRefreshLocked(MAX_DELAY_MILLIS);
             }
         }
@@ -296,15 +314,23 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         }
     }
 
-    private void install(String token, long issuedAt) {
+    private void installAndComplete(
+            CompletableFuture<String> refresh, String token, long issuedAt) {
         synchronized (lock) {
+            if (closed) {
+                refresh.completeExceptionally(
+                        new TokenRefreshException(REFRESH_CANCELLED_MESSAGE));
+                return;
+            }
             cached = new CachedToken(
                     token,
                     issuedAt + refreshAfterMillis,
-                    issuedAt + ElastiCacheIamAuthTokenProvider.TOKEN_TTL.toMillis());
+                    issuedAt + EFFECTIVE_TOKEN_LIFETIME.toMillis());
+            retryNotBefore = 0;
             scheduleRefreshLocked(refreshAfterMillis);
+            refresh.complete(token);
+            notifyTokenChanged(token);
         }
-        notifyTokenChanged(token);
     }
 
     private void notifyTokenChanged(String token) {
@@ -312,9 +338,15 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             return;
         }
         try {
-            onTokenChanged.accept(token);
+            callbackExecutor.execute(() -> {
+                try {
+                    onTokenChanged.accept(token);
+                } catch (Throwable ignored) {
+                    // A consumer callback cannot invalidate a successfully signed token.
+                }
+            });
         } catch (Throwable ignored) {
-            // A consumer callback cannot invalidate a successfully signed token.
+            // Failure to dispatch a callback cannot invalidate a signed token.
         }
     }
 
@@ -363,6 +395,9 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             if (cause instanceof RuntimeException) {
                 throw (RuntimeException) cause;
             }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
             throw exception;
         }
     }
@@ -378,10 +413,10 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         if (resolved.isNegative()
                 || resolved.isZero()
                 || millis <= 0
-                || resolved.compareTo(ElastiCacheIamAuthTokenProvider.TOKEN_TTL) >= 0) {
+                || resolved.compareTo(EFFECTIVE_TOKEN_LIFETIME) >= 0) {
             throw new InvalidParameterException(
                     "Invalid value for parameter 'refreshAfter': must be at least "
-                            + "1 millisecond and less than 15 minutes.");
+                            + "1 millisecond and less than 14 minutes 40 seconds.");
         }
         return millis;
     }
@@ -428,12 +463,15 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         private AwsCredentialsProvider credentialsProvider;
         private Duration refreshAfter;
         private Consumer<String> onTokenChanged;
+        private Executor callbackExecutor;
         private Supplier<String> awsRegionEnvironmentProvider;
         private AwsRegionProvider regionProvider;
         private Clock signingClock;
         private LongSupplier currentTimeMillis;
         private DoubleSupplier random;
         private Scheduler scheduler;
+        private Runnable beforeInstall;
+        private Runnable onSharedRefresh;
 
         private Builder() {}
 
@@ -497,7 +535,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
          * Sets how long after issuance the token is refreshed in the background.
          *
          * <p>The default is 5 minutes. The value must be at least 1 millisecond
-         * and less than the 15-minute token lifetime.
+         * and less than the effective 14-minute-40-second token lifetime. The
+         * effective lifetime reserves 20 seconds for clock skew and transit time.
          *
          * @param refreshAfter refresh delay after token issuance
          * @return this builder
@@ -508,7 +547,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         }
 
         /**
-         * Sets a callback invoked after each newly generated token is installed.
+         * Sets a callback invoked asynchronously after each newly generated token
+         * is installed and made available to token callers.
          *
          * <p>Callback failures are ignored and do not discard the new token.
          *
@@ -548,6 +588,23 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
 
         Builder scheduler(Scheduler scheduler) {
             this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+            return this;
+        }
+
+        Builder callbackExecutor(Executor callbackExecutor) {
+            this.callbackExecutor =
+                    Objects.requireNonNull(callbackExecutor, "callbackExecutor");
+            return this;
+        }
+
+        Builder beforeInstall(Runnable beforeInstall) {
+            this.beforeInstall = Objects.requireNonNull(beforeInstall, "beforeInstall");
+            return this;
+        }
+
+        Builder onSharedRefresh(Runnable onSharedRefresh) {
+            this.onSharedRefresh =
+                    Objects.requireNonNull(onSharedRefresh, "onSharedRefresh");
             return this;
         }
 
