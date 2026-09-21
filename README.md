@@ -3,7 +3,7 @@
 This repository contains libraries and tools for working with
 [Amazon ElastiCache](https://aws.amazon.com/elasticache/).
 
-The Python and Node.js libraries support
+The Python, Java, and Node.js libraries offer
 [IAM authentication](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/auth-iam.html)
 for ElastiCache. They generate the signed token required to connect with an
 IAM-enabled user, allowing applications to authenticate to a Valkey or Redis OSS
@@ -14,6 +14,7 @@ cache with AWS credentials.
 | Language | Package | Documentation |
 |---|---|---|
 | Python | [`developer-toolkit-elasticache`](https://pypi.org/project/developer-toolkit-elasticache/) on PyPI | [python/README.md](python/README.md) |
+| Java | `software.amazon.elasticache:developer-toolkit-elasticache` | [java/README.md](java/README.md) |
 | Node.js | `@aws/developer-toolkit-elasticache` on npm | [node/README.md](node/README.md) |
 
 ## Quick start
@@ -37,6 +38,22 @@ token = generate_iam_auth_token(
 Use the returned token as the password when connecting to the cache. See the
 [Python README](python/README.md) for requirements, the credential chain, the Python
 command-line tool, and client integration examples.
+
+### Java
+
+```java
+ElastiCacheIamAuthTokenProvider auth = ElastiCacheIamAuthTokenProvider.builder()
+        .serverlessCacheName("my-cache")
+        .userId("iam-user")
+        .region(Region.US_EAST_1)
+        .build();
+
+String username = auth.getUserId();
+String password = auth.getToken();
+```
+
+See the [Java README](java/README.md) for Maven setup, region and credential
+resolution, and a standalone TLS connection example.
 
 ### Node.js
 
@@ -65,7 +82,6 @@ tracking bugs and feature requests.
 
 - Ask a question or [open a discussion](https://github.com/aws/developer-toolkit-elasticache/discussions).
 - If you think you may have found a bug, please [open an issue](https://github.com/aws/developer-toolkit-elasticache/issues/new).
-
 
 ## Contributing
 
