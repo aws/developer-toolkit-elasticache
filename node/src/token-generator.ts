@@ -14,7 +14,8 @@ import type {
 
 import { ConfigurationError, InvalidParameterError } from "./errors.js";
 
-const TOKEN_TTL_SECONDS = 900;
+/** Lifetime of a presigned ElastiCache IAM token, in seconds. */
+export const TOKEN_TTL_SECONDS = 900;
 const SIGNING_SERVICE = "elasticache";
 
 // The cache name becomes the SigV4 signing host. Keep this validation tight so a
@@ -346,11 +347,21 @@ export class ElastiCacheIAMAuthTokenProvider {
     dependencies: TokenGeneratorDependencies = {},
   ): Promise<ElastiCacheIAMAuthTokenProvider> {
     const provider = new ElastiCacheIAMAuthTokenProvider(options, dependencies);
-    const regionResolution = await provider.regionResolution;
+    await provider.ensureRegionResolved();
+    return provider;
+  }
+
+  /**
+   * Await region resolution, throwing the retained configuration error if the
+   * region could not be resolved.
+   *
+   * @throws {ConfigurationError} when no region can be resolved.
+   */
+  async ensureRegionResolved(): Promise<void> {
+    const regionResolution = await this.regionResolution;
     if ("error" in regionResolution) {
       throw regionResolution.error;
     }
-    return provider;
   }
 
   get userId(): string {
