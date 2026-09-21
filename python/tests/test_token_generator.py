@@ -6,7 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.credentials import Credentials
-from botocore.session import Session
+from helpers import (
+    CACHE,
+    REGION,
+    ROTATED_CREDENTIALS,
+    SESSION_REGION,
+    USER,
+    fake_session,
+)
 
 from developer_toolkit_elasticache import (
     ElastiCacheIAMAuthTokenProvider,
@@ -16,67 +23,6 @@ from developer_toolkit_elasticache.errors import (
     ConfigurationError,
     InvalidParameterError,
 )
-
-CACHE = "my-cache"
-USER = "testuser"
-REGION = "us-east-1"
-# Deliberately different from REGION so a test can tell an explicitly-passed region
-# apart from one that fell back to the session.
-SESSION_REGION = "eu-west-1"
-
-_DEFAULT_CREDENTIALS = Credentials("FRAIDA1FODNN7EXAMPLE", "secret", "token")
-_ROTATED_CREDENTIALS = Credentials("AKIAI44QH8DHBEXAMPLE", "other-secret", "token2")
-
-# Sentinel so callers can ask for "no credentials at all" (None) and still be
-# distinguishable from "just give me the default set".
-_UNSET = object()
-
-
-def _fake_session(credentials=_UNSET, region=_UNSET):
-    """A botocore session stand-in that vends fixed credentials and a region.
-
-    Every test signs with an injected session, so the suite never touches the real
-    AWS credential chain: no environment, config file, or IMDS lookup can leak in.
-    Pass ``credentials=None`` to simulate an empty credential chain, or
-    ``region=None`` to simulate a session with no region configured.
-
-    The region is stubbed explicitly rather than left to MagicMock's auto-attribute,
-    because an auto-created mock is truthy and would let a broken fallback look like
-    it resolved a region.
-    """
-    if credentials is _UNSET:
-        credentials = _DEFAULT_CREDENTIALS
-    if region is _UNSET:
-        region = SESSION_REGION
-    session = MagicMock(spec=Session)
-    if credentials is None:
-        session.get_credentials.return_value = None
-    else:
-        session.get_credentials.return_value = MagicMock(
-            get_frozen_credentials=MagicMock(return_value=credentials)
-        )
-    session.get_config_variable.side_effect = lambda name: (
-        region if name == "region" else None
-    )
-    return session
-
-
-@pytest.fixture
-def mock_session():
-    return _fake_session()
-
-
-@pytest.fixture(autouse=True)
-def no_region_env(monkeypatch):
-    """Sever the region environment variables for every test.
-
-    Autouse because AWS_REGION is read from the environment directly, so without this
-    the suite's result would depend on the developer's shell: a region exported
-    locally would mask the session fallback and quietly pass a broken build. Tests
-    that want the env var set it explicitly with monkeypatch.setenv.
-    """
-    monkeypatch.delenv("AWS_REGION", raising=False)
-    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
 
 
 def _assert_valid_token(token, *, serverless=True):
@@ -167,7 +113,7 @@ def test_rotated_credentials_change_the_signature(mock_session):
     first = auth.get_token()
 
     mock_session.get_credentials.return_value = MagicMock(
-        get_frozen_credentials=MagicMock(return_value=_ROTATED_CREDENTIALS)
+        get_frozen_credentials=MagicMock(return_value=ROTATED_CREDENTIALS)
     )
     assert auth.get_token() != first
 
@@ -189,7 +135,7 @@ def test_empty_credential_chain_raises():
         serverless_cache_name=CACHE,
         user_id=USER,
         region=REGION,
-        session=_fake_session(credentials=None),
+        session=fake_session(credentials=None),
     )
     with pytest.raises(ConfigurationError, match="credentials"):
         auth.get_token()
@@ -398,7 +344,7 @@ def test_region_falls_back_to_the_session(mock_session):
 
 def test_explicit_region_overrides_the_session():
     """An explicitly passed region wins over the session's configured one."""
-    session = _fake_session(region=SESSION_REGION)
+    session = fake_session(region=SESSION_REGION)
     token = generate_iam_auth_token(
         serverless_cache_name=CACHE, user_id=USER, region=REGION, session=session
     )
@@ -413,7 +359,7 @@ def test_aws_region_env_var_is_honoured(mock_session, monkeypatch):
     is set only there would otherwise have a working CLI and a failing toolkit.
     """
     monkeypatch.setenv("AWS_REGION", ENV_REGION)
-    session = _fake_session(region=None)
+    session = fake_session(region=None)
     token = generate_iam_auth_token(
         serverless_cache_name=CACHE, user_id=USER, session=session
     )
@@ -423,7 +369,7 @@ def test_aws_region_env_var_is_honoured(mock_session, monkeypatch):
 def test_aws_region_takes_priority_over_the_session(monkeypatch):
     """Environment beats config file, matching how botocore ranks its own sources."""
     monkeypatch.setenv("AWS_REGION", ENV_REGION)
-    session = _fake_session(region=SESSION_REGION)
+    session = fake_session(region=SESSION_REGION)
     token = generate_iam_auth_token(
         serverless_cache_name=CACHE, user_id=USER, session=session
     )
@@ -438,7 +384,7 @@ def test_explicit_region_overrides_aws_region_env_var(monkeypatch):
         serverless_cache_name=CACHE,
         user_id=USER,
         region=REGION,
-        session=_fake_session(region=SESSION_REGION),
+        session=fake_session(region=SESSION_REGION),
     )
     assert f"%2F{REGION}%2F" in token
     assert ENV_REGION not in token
@@ -446,7 +392,7 @@ def test_explicit_region_overrides_aws_region_env_var(monkeypatch):
 
 def test_missing_region_raises():
     """No region anywhere is a user-fixable configuration problem."""
-    session = _fake_session(region=None)
+    session = fake_session(region=None)
     with pytest.raises(ConfigurationError, match="region"):
         generate_iam_auth_token(
             serverless_cache_name=CACHE, user_id=USER, session=session
@@ -455,7 +401,7 @@ def test_missing_region_raises():
 
 def test_missing_region_error_names_every_source():
     """The message must name each place a region can come from."""
-    session = _fake_session(region=None)
+    session = fake_session(region=None)
     with pytest.raises(ConfigurationError, match="AWS_REGION"):
         generate_iam_auth_token(
             serverless_cache_name=CACHE, user_id=USER, session=session
@@ -475,7 +421,7 @@ def test_class_region_falls_back_to_the_session(mock_session):
 
 def test_class_missing_region_fails_at_construction():
     """A missing region surfaces immediately, not at the first connection attempt."""
-    session = _fake_session(region=None)
+    session = fake_session(region=None)
     with pytest.raises(ConfigurationError, match="region"):
         ElastiCacheIAMAuthTokenProvider(
             serverless_cache_name=CACHE, user_id=USER, session=session
@@ -505,7 +451,7 @@ _KAT_USER = "testuser"
 
 
 def _kat_session():
-    return _fake_session(credentials=_KAT_CREDENTIALS, region=_KAT_REGION)
+    return fake_session(credentials=_KAT_CREDENTIALS, region=_KAT_REGION)
 
 
 def _generate_at_fixed_time(**kwargs):

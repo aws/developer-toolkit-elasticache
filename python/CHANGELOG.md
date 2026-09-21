@@ -4,6 +4,23 @@ All notable changes to the Python package are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `ElastiCacheIAMAuthTokenManager` — caches a token for 880 seconds (its lifetime
+  minus a 900 - 20-second serve margin) and refreshes it on a background daemon thread
+  `refresh_after` seconds after signing (default 300). Concurrent callers share a
+  single signing cycle and its outcome; failed refreshes are retried with jittered
+  exponential backoff while the current token is still served, with a warning
+  logged per failed cycle; `on_token_changed` reports each new token;
+  `get_credentials()` returns `(user_id, token)`; `close()` or a `with` block stops
+  background work.
+- `TokenRefreshError` — raised by the manager when a cached token expired before a
+  refresh could replace it, or after `close()`; `__cause__` is the last refresh error.
+  Not a `ToolkitInputError`.
+- `DEFAULT_REFRESH_AFTER_SECONDS` constant.
+
 ## [1.0.0] - Unreleased
 
 Initial release.

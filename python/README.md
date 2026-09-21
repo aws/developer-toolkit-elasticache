@@ -88,6 +88,69 @@ username, password = auth.user_id, auth.get_token()
 
 The [`examples/`](examples/) directory has redis-py and valkey-py integrations.
 
+### Caching and background refresh
+
+`ElastiCacheIAMAuthTokenProvider` is stateless: every `get_token()` call resolves
+credentials and signs a new token. `ElastiCacheIAMAuthTokenManager` adds caching on
+top of that:
+
+|                        | `ElastiCacheIAMAuthTokenProvider` | `ElastiCacheIAMAuthTokenManager`                |
+| ---------------------- | --------------------------------- | ----------------------------------------------- |
+| Token per `get_token()`| A freshly signed token every call | The cached token while it is valid              |
+| Refresh                | Caller-driven                     | Background, `refresh_after` seconds after signing |
+| Refresh failures       | Raised to the caller              | Retried, with the current token still served    |
+| Change notification    | None                              | `on_token_changed`                              |
+| Cleanup                | None needed                       | `close()`, or use as a context manager          |
+
+Use the manager when a client reconnects often or asks for a token more often than
+the 900-second token lifetime; use the provider when each call should sign a new
+token.
+
+```python
+from developer_toolkit_elasticache import ElastiCacheIAMAuthTokenManager
+
+with ElastiCacheIAMAuthTokenManager(
+    serverless_cache_name="my-cache",
+    user_id="iam-user",
+    region="us-east-1",
+    # Optional; defaults to 300. Must be greater than 0 and less than 880.
+    refresh_after=300,
+    on_token_changed=lambda token: print("installed a new IAM auth token"),
+) as auth:
+    username, password = auth.get_credentials()
+```
+
+`get_credentials()` returns `(user_id, token)` for clients that take a no-argument
+credentials callable; `get_token()` remains available when the client takes the
+username and password separately.
+
+The region is resolved when the manager is created, but no credentials are resolved
+and no token is signed until the first `get_token()` or `get_credentials()` call.
+After that, `get_token()` returns the cached token immediately while it is valid. A
+token is served for 880 seconds after signing — its 900-second lifetime minus a
+20-second margin for clock skew and the `AUTH` round trip — and `refresh_after` must
+be below that. A background thread signs a replacement `refresh_after` seconds after
+each token is issued; concurrent callers with no valid token share a single signing
+and receive the same outcome.
+
+A refresh makes up to 8 attempts, the first immediate and the rest with exponential
+backoff from 100 ms to a nominal cap of 5 seconds, each delay jittered by ±20%. Every
+error is retried, including `ConfigurationError`: on an instance role a transient
+IMDS failure surfaces as "no credentials". A `get_token()` call with no valid token
+blocks for that cycle, so it can take several seconds when signing keeps failing.
+
+While the current token is still valid a failed refresh is invisible to callers: the
+cached token keeps being served, another refresh is scheduled, and a warning is
+logged to the `developer_toolkit_elasticache.token_manager` logger. `get_token()`
+raises `TokenRefreshError` only if the cached token expired before a refresh could
+replace it, or after `close()`; its `__cause__` is the error from the last attempt. A
+failure to sign the very first token is raised as the underlying error instead.
+
+`on_token_changed` must be a synchronous callable; if it raises, the error is logged
+and the new token is kept. The refresh thread is a daemon, so it never keeps the
+interpreter alive on its own. Call `close()` (or leave the `with` block) when the
+manager is no longer needed.
+
 ### Command line
 
 ```bash
