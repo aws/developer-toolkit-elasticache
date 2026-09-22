@@ -20,11 +20,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -368,32 +367,35 @@ class ElastiCacheIamAuthTokenManagerTest {
 
     @Test
     void blockingTokenChangedCallbackDoesNotDelayTokenCaller() throws Exception {
-        TestScheduler scheduler = new TestScheduler();
         CountDownLatch callbackEntered = new CountDownLatch(1);
         CountDownLatch releaseCallback = new CountDownLatch(1);
-        ExecutorService callbackExecutor = Executors.newSingleThreadExecutor();
-        ElastiCacheIamAuthTokenManager manager =
-                baseBuilder(scheduler, new AtomicInteger(), new AtomicBoolean())
-                        .callbackExecutor(callbackExecutor)
-                        .onTokenChanged(token -> {
-                            callbackEntered.countDown();
-                            try {
-                                releaseCallback.await();
-                            } catch (InterruptedException exception) {
-                                Thread.currentThread().interrupt();
-                            }
-                        })
-                        .build();
+        AtomicReference<String> callbackThread = new AtomicReference<>();
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> FIRST_CREDENTIALS)
+                .signingClock(SIGNING_CLOCK)
+                .onTokenChanged(token -> {
+                    callbackThread.set(Thread.currentThread().getName());
+                    callbackEntered.countDown();
+                    try {
+                        releaseCallback.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                })
+                .build();
         try {
             CompletableFuture<String> token =
                     CompletableFuture.supplyAsync(manager::getToken);
 
             await(callbackEntered);
             assertFalse(token.get(5, TimeUnit.SECONDS).isEmpty());
+            assertEquals("elasticache-iam-token-refresh", callbackThread.get());
         } finally {
             releaseCallback.countDown();
             manager.close();
-            callbackExecutor.shutdownNow();
         }
     }
 
@@ -455,7 +457,6 @@ class ElastiCacheIamAuthTokenManagerTest {
         CountDownLatch install = new CountDownLatch(1);
         ElastiCacheIamAuthTokenManager manager =
                 baseBuilder(scheduler, new AtomicInteger(), new AtomicBoolean())
-                        .callbackExecutor(Runnable::run)
                         .onTokenChanged(changedTokens::add)
                         .beforeInstall(() -> {
                             signed.countDown();
@@ -525,8 +526,7 @@ class ElastiCacheIamAuthTokenManagerTest {
                 .signingClock(SIGNING_CLOCK)
                 .currentTimeMillis(scheduler::now)
                 .random(() -> 0.5)
-                .scheduler(scheduler)
-                .callbackExecutor(Runnable::run);
+                .scheduler(scheduler);
     }
 
     private static void awaitCreatedTasks(TestScheduler scheduler, int expected) {
@@ -600,6 +600,11 @@ class ElastiCacheIamAuthTokenManagerTest {
             created.add(scheduled);
             notifyAll();
             return scheduled;
+        }
+
+        @Override
+        public void execute(Runnable task) {
+            task.run();
         }
 
         @Override

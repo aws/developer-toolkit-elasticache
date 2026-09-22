@@ -9,9 +9,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -57,7 +55,6 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     private final ElastiCacheIamAuthTokenProvider provider;
     private final long refreshAfterMillis;
     private final Consumer<String> onTokenChanged;
-    private final Executor callbackExecutor;
     private final LongSupplier currentTimeMillis;
     private final DoubleSupplier random;
     private final Scheduler scheduler;
@@ -93,9 +90,6 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
                 .build();
         this.refreshAfterMillis = resolveRefreshAfterMillis(builder.refreshAfter);
         this.onTokenChanged = builder.onTokenChanged;
-        this.callbackExecutor = builder.callbackExecutor == null
-                ? ForkJoinPool.commonPool()
-                : builder.callbackExecutor;
         this.currentTimeMillis = builder.currentTimeMillis == null
                 ? System::currentTimeMillis
                 : builder.currentTimeMillis;
@@ -329,8 +323,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             retryNotBefore = 0;
             scheduleRefreshLocked(refreshAfterMillis);
             refresh.complete(token);
-            notifyTokenChanged(token);
         }
+        notifyTokenChanged(token);
     }
 
     private void notifyTokenChanged(String token) {
@@ -338,7 +332,7 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             return;
         }
         try {
-            callbackExecutor.execute(() -> {
+            scheduler.execute(() -> {
                 try {
                     onTokenChanged.accept(token);
                 } catch (Throwable ignored) {
@@ -463,7 +457,6 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         private AwsCredentialsProvider credentialsProvider;
         private Duration refreshAfter;
         private Consumer<String> onTokenChanged;
-        private Executor callbackExecutor;
         private Supplier<String> awsRegionEnvironmentProvider;
         private AwsRegionProvider regionProvider;
         private Clock signingClock;
@@ -547,10 +540,12 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
         }
 
         /**
-         * Sets a callback invoked asynchronously after each newly generated token
-         * is installed and made available to token callers.
+         * Sets a callback invoked on the manager's refresh thread after each newly
+         * generated token is installed and made available to token callers.
          *
-         * <p>Callback failures are ignored and do not discard the new token.
+         * <p>The callback should return quickly because it delays this manager's
+         * next background refresh. Callback failures are ignored and do not discard
+         * the new token.
          *
          * @param onTokenChanged token-change callback
          * @return this builder
@@ -591,12 +586,6 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             return this;
         }
 
-        Builder callbackExecutor(Executor callbackExecutor) {
-            this.callbackExecutor =
-                    Objects.requireNonNull(callbackExecutor, "callbackExecutor");
-            return this;
-        }
-
         Builder beforeInstall(Runnable beforeInstall) {
             this.beforeInstall = Objects.requireNonNull(beforeInstall, "beforeInstall");
             return this;
@@ -625,6 +614,8 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     interface Scheduler {
         Cancellable schedule(Runnable task, long delayMillis);
 
+        void execute(Runnable task);
+
         void close();
     }
 
@@ -637,6 +628,11 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
             ScheduledFuture<?> future =
                     executor.schedule(task, delayMillis, TimeUnit.MILLISECONDS);
             return () -> future.cancel(false);
+        }
+
+        @Override
+        public void execute(Runnable task) {
+            executor.execute(task);
         }
 
         @Override
