@@ -47,6 +47,9 @@ _REFRESH_FAILED_MESSAGE = (
     "Could not refresh the ElastiCache IAM authentication token before the previous "
     "token expired."
 )
+_REPLACEMENT_FAILED_MESSAGE = (
+    "Could not sign a replacement ElastiCache IAM authentication token."
+)
 
 # Module attributes so tests can substitute the clock, scheduler, jitter, and sleep.
 # Wall clock, not monotonic: the server judges the token by X-Amz-Date against its own
@@ -103,7 +106,10 @@ class ElastiCacheIAMAuthTokenManager:
     seconds after each token (default 300; must be below the 880s effective lifetime,
     which is the 900s token lifetime minus a 20s serve margin) while callers keep
     receiving the current one. ``on_token_changed`` is called synchronously
-    with each new token; its failures are ignored.
+    with each new token; its failures are logged and otherwise ignored.
+
+    ``refresh_token()`` signs a replacement immediately, for a client whose ``AUTH``
+    was rejected with a token this manager still considers valid.
 
     Thread-safe: callers with no valid token share one signing cycle. Call
     ``close()`` (or use as a context manager) when done; later calls raise
@@ -164,7 +170,25 @@ class ElastiCacheIAMAuthTokenManager:
                 if now >= self._refresh_due_at:
                     self._start_background_refresh_locked(cached)
                 return cached.token
-        return self._refresh(reuse_if_issued_after=-math.inf)
+        return self._refresh(reuse_unless=None)
+
+    def refresh_token(self) -> str:
+        """Sign a replacement token now and return it.
+
+        Use after the server rejected the current token (for example because the
+        signing credentials were revoked). Joins a signing cycle already in progress
+        instead of starting another. Raises ``TokenRefreshError`` if no replacement
+        could be signed, or after ``close()``.
+        """
+        with self._lock:
+            self._ensure_open()
+            current = self._cached
+        token = self._refresh(reuse_unless=current)
+        with self._lock:
+            replaced = self._cached is not None and self._cached is not current
+        if not replaced:
+            raise TokenRefreshError(_REPLACEMENT_FAILED_MESSAGE)
+        return token
 
     def close(self) -> None:
         """Stop background refresh and drop the cached token. Idempotent."""
@@ -186,17 +210,19 @@ class ElastiCacheIAMAuthTokenManager:
         if self._closed:
             raise TokenRefreshError(_CLOSED_MESSAGE)
 
-    def _refresh(self, *, reuse_if_issued_after: float) -> str:
-        """Sign a new token, or reuse one issued after ``reuse_if_issued_after``.
+    def _refresh(self, *, reuse_unless: "_CachedToken | None") -> str:
+        """Sign a new token, unless a valid one other than ``reuse_unless`` is cached.
 
-        Joins the signing cycle already in progress, if any, and shares its outcome.
+        ``reuse_unless`` is the token the caller wants replaced (``None`` to accept any
+        valid token). Joins the signing cycle already in progress, if any, and shares
+        its outcome.
         """
         with self._lock:
             self._ensure_open()
             cached = self._cached
             if (
                 cached is not None
-                and cached.issued_at > reuse_if_issued_after
+                and cached is not reuse_unless
                 and _now() < cached.expires_at
             ):
                 return cached.token
@@ -207,20 +233,28 @@ class ElastiCacheIAMAuthTokenManager:
         if not owner:
             return flight.result()
         try:
-            token = self._run_refresh_cycle()
+            token, installed = self._run_refresh_cycle()
         except BaseException as error:
             flight.set_exception(error)
             raise
         else:
             flight.set_result(token)
-            return token
         finally:
             with self._lock:
                 if self._inflight is flight:
                     self._inflight = None
+        # Only after the flight is closed: a refresh timer that fires now starts its own
+        # cycle instead of joining this one and skipping the reschedule, and a slow
+        # callback cannot hold the flight open.
+        if installed:
+            with self._lock:
+                if not self._closed and self._cached is not None:
+                    self._schedule_locked(self._refresh_after, self._cached)
+            self._notify(token)
+        return token
 
-    def _run_refresh_cycle(self) -> str:
-        """Sign with retries.
+    def _run_refresh_cycle(self) -> tuple[str, bool]:
+        """Sign with retries; returns ``(token, newly_installed)``.
 
         Every error is retried: on an instance role a transient IMDS failure surfaces
         as "no credentials", so even ``ConfigurationError`` may be transient. On
@@ -241,8 +275,7 @@ class ElastiCacheIAMAuthTokenManager:
             with self._lock:
                 self._ensure_open()
                 self._install_locked(token, issued_at)
-            self._notify(token)
-            return token
+            return token, True
 
         remaining = 0.0
         with self._lock:
@@ -262,7 +295,12 @@ class ElastiCacheIAMAuthTokenManager:
                 remaining,
                 _MAX_DELAY_SECONDS,
             )
-            return cached.token
+            # Re-check: the token may have expired while the lock was released, and a
+            # waiter that joined because its token expired must not get it back.
+            with self._lock:
+                self._raise_if_closed(last_error)
+                if _now() < cached.expires_at:
+                    return cached.token, False
         if cached is None and last_error is not None:
             raise last_error
         raise TokenRefreshError(_REFRESH_FAILED_MESSAGE) from last_error
@@ -272,8 +310,9 @@ class ElastiCacheIAMAuthTokenManager:
             return
         try:
             self._on_token_changed(token)
-        except Exception:  # a callback failure must not discard the token
-            _logger.warning("on_token_changed callback raised", exc_info=True)
+        except Exception as error:  # noqa: BLE001  # a callback failure must not discard the token
+            # Type only: the callback received the token, so its message might too.
+            _logger.warning("on_token_changed callback raised %s", type(error).__name__)
 
     def _raise_if_closed(self, cause: Exception | None) -> None:
         if self._closed:
@@ -286,12 +325,15 @@ class ElastiCacheIAMAuthTokenManager:
         return delay * jitter
 
     def _install_locked(self, token: str, issued_at: float) -> None:
+        """Cache the token. Its refresh timer is started by ``_refresh`` once the
+        flight is closed; until then the due time is set so nobody treats the gap as
+        a missed timer."""
         self._cached = _CachedToken(
             token=token,
             issued_at=issued_at,
             expires_at=issued_at + _EFFECTIVE_LIFETIME_SECONDS,
         )
-        self._schedule_locked(self._refresh_after, self._cached)
+        self._refresh_due_at = _now() + self._refresh_after
 
     def _schedule_locked(self, delay: float, due: _CachedToken) -> None:
         """Schedule a background refresh of ``due``; on failure, leave it to get_token()."""
@@ -322,7 +364,7 @@ class ElastiCacheIAMAuthTokenManager:
             # A cycle that fails while the token is valid logs, reschedules, and
             # returns. It only raises once the token has expired; the next get_token()
             # surfaces that to a caller, so nothing is lost by not re-raising here.
-            self._refresh(reuse_if_issued_after=due.issued_at)
+            self._refresh(reuse_unless=due)
         except Exception as error:  # noqa: BLE001  # a timer thread has nobody to raise to
             _logger.warning(
                 "Background refresh of the ElastiCache IAM auth token failed and the "

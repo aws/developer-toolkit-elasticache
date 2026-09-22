@@ -3,6 +3,7 @@
 
 import threading
 import time
+from concurrent.futures import Future
 
 import pytest
 from helpers import CACHE, REGION, ROTATED_CREDENTIALS, USER, fake_session
@@ -140,8 +141,13 @@ def _manager(session, **kwargs):
     return ElastiCacheIAMAuthTokenManager(session=session, **kwargs)
 
 
-def _run_concurrently(count, target):
-    """Start ``count`` threads that all enter ``target`` at once; return their results."""
+def _run_concurrently(count, target, *, after_start=None):
+    """Start ``count`` daemon threads that all enter ``target`` at once.
+
+    ``after_start`` runs on the test thread once the workers are going, e.g. to release
+    a flight they are waiting on. A deadlock fails the liveness assertion instead of
+    hanging pytest, because the workers are daemons.
+    """
     results = []
     results_lock = threading.Lock()
     ready = threading.Barrier(count)
@@ -155,13 +161,68 @@ def _run_concurrently(count, target):
         with results_lock:
             results.append(outcome)
 
-    threads = [threading.Thread(target=worker) for _ in range(count)]
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(count)]
     for thread in threads:
         thread.start()
+    if after_start is not None:
+        after_start()
     for thread in threads:
         thread.join(timeout=5)
+        assert not thread.is_alive(), "worker did not finish: deadlock?"
     assert len(results) == count
     return results
+
+
+def _run_bounded(target, timeout=5):
+    """Run ``target`` on a daemon thread; fail (don't hang) if it does not finish."""
+    box = {}
+
+    def run():
+        try:
+            box["result"] = target()
+        except Exception as error:  # noqa: BLE001  # re-raised on the test thread
+            box["error"] = error
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    assert not thread.is_alive(), "target did not finish: deadlock?"
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
+
+class JoinCountingFuture(Future):
+    """A Future that counts callers entering result(), so a test can wait until
+    every waiter has actually joined the flight before releasing the owner."""
+
+    joins = 0
+    joins_changed = threading.Condition()
+
+    def result(self, timeout=None):
+        with JoinCountingFuture.joins_changed:
+            JoinCountingFuture.joins += 1
+            JoinCountingFuture.joins_changed.notify_all()
+        return super().result(timeout)
+
+    @classmethod
+    def reset(cls):
+        with cls.joins_changed:
+            cls.joins = 0
+
+    @classmethod
+    def wait_for_joins(cls, count, timeout=5):
+        with cls.joins_changed:
+            assert cls.joins_changed.wait_for(lambda: cls.joins >= count, timeout), (
+                f"only {cls.joins} of {count} waiters joined the flight"
+            )
+
+
+@pytest.fixture
+def join_counting_future(monkeypatch):
+    JoinCountingFuture.reset()
+    monkeypatch.setattr(token_manager, "Future", JoinCountingFuture)
+    return JoinCountingFuture
 
 
 # --- errors and exports ------------------------------------------------------------
@@ -253,33 +314,47 @@ def test_validates_parameters_at_construction(clock, mock_session):
 # --- single flight -----------------------------------------------------------------
 
 
-def test_concurrent_callers_share_one_signing(clock):
+def test_concurrent_callers_share_one_signing(clock, join_counting_future):
     session = fake_session()
     credentials = session.get_credentials.return_value
+    release_owner = threading.Event()
 
-    def slow_get_credentials():
-        # Hold the flight open long enough for every worker to join it.
-        time.sleep(0.05)
+    def blocked_get_credentials():
+        # The owner holds the flight open here until every waiter has joined it.
+        assert release_owner.wait(timeout=5)
         return credentials
 
-    session.get_credentials.side_effect = slow_get_credentials
+    session.get_credentials.side_effect = blocked_get_credentials
     manager = _manager(session)
 
-    tokens = _run_concurrently(5, manager.get_token)
+    def release_once_all_joined():
+        join_counting_future.wait_for_joins(4)  # 5 callers: 1 owner + 4 waiters
+        release_owner.set()
+
+    tokens = _run_concurrently(5, manager.get_token, after_start=release_once_all_joined)
 
     assert all(isinstance(token, str) for token in tokens)
+    assert len(set(tokens)) == 1
     assert session.get_credentials.call_count == 1
 
 
-def test_concurrent_callers_share_one_failure(clock, sleep):
+def test_concurrent_callers_share_one_failure(clock, sleep, join_counting_future):
     # A failed cycle is reported to every waiter, rather than each waiter running its
     # own eight attempts in turn.
     session = fake_session()
     _failing_then_ok(session, failures=1_000)
-    sleep.on_sleep = lambda: time.sleep(0.005)
+    release_owner = threading.Event()
+    # The owner's first retry sleep holds the flight open until the waiters joined.
+    sleep.on_sleep = lambda: release_owner.wait(timeout=5)
     manager = _manager(session)
 
-    outcomes = _run_concurrently(4, manager.get_token)
+    def release_once_all_joined():
+        join_counting_future.wait_for_joins(3)  # 4 callers: 1 owner + 3 waiters
+        release_owner.set()
+
+    outcomes = _run_concurrently(
+        4, manager.get_token, after_start=release_once_all_joined
+    )
 
     assert all(isinstance(outcome, RuntimeError) for outcome in outcomes)
     assert len({id(outcome) for outcome in outcomes}) == 1
@@ -580,6 +655,27 @@ def test_raises_token_refresh_error_once_the_cached_token_expired(
     assert "transient failure" not in str(excinfo.value)
 
 
+def test_fallback_token_is_rechecked_after_the_lock_is_released(
+    clock, scheduler, sleep, mock_session, monkeypatch
+):
+    # The cycle decides "serve the still-valid token" under the lock, then logs with the
+    # lock released. If the token expires in that gap, a waiter that joined because its
+    # token had expired must not receive it.
+    manager = _manager(mock_session)
+    manager.get_token()
+    _failing_then_ok(mock_session, failures=1_000)
+    clock.advance(EFFECTIVE_LIFETIME - 1)  # 1s of validity left when the cycle ends
+    monkeypatch.setattr(
+        token_manager._logger, "warning", lambda *a, **k: clock.advance(1)
+    )
+
+    # refresh_token() runs the cycle in the foreground. Without the re-check the
+    # cycle would hand back the now-expired token and refresh_token() would complain
+    # about a missing replacement; with it, the expiry itself is reported.
+    with pytest.raises(TokenRefreshError, match="before the previous token expired"):
+        manager.refresh_token()
+
+
 def test_expired_token_with_a_configuration_error_is_a_refresh_error(
     clock, scheduler, sleep, mock_session
 ):
@@ -594,7 +690,78 @@ def test_expired_token_with_a_configuration_error_is_a_refresh_error(
     assert isinstance(excinfo.value.__cause__, ConfigurationError)
 
 
+# --- refresh_token -----------------------------------------------------------------
+
+
+def test_refresh_token_signs_a_replacement_immediately(clock, scheduler):
+    session = fake_session()
+    manager = _manager(session)
+    first = manager.get_token()
+    session.get_credentials.return_value.get_frozen_credentials.return_value = (
+        ROTATED_CREDENTIALS
+    )
+
+    replacement = manager.refresh_token()
+
+    assert replacement != first
+    assert manager.get_token() == replacement
+    assert session.get_credentials.call_count == 2
+    # The replacement gets a fresh refresh timer.
+    assert [call.delay for call in scheduler.pending] == [DEFAULT_REFRESH_AFTER_SECONDS]
+
+
+def test_refresh_token_with_no_cached_token_signs_the_first_one(clock, mock_session):
+    manager = _manager(mock_session)
+
+    token = manager.refresh_token()
+
+    assert manager.get_token() == token
+    assert mock_session.get_credentials.call_count == 1
+
+
+def test_refresh_token_raises_when_no_replacement_could_be_signed(clock, sleep):
+    session = fake_session()
+    manager = _manager(session)
+    first = manager.get_token()
+    _failing_then_ok(session, failures=1_000)
+
+    with pytest.raises(TokenRefreshError, match="replacement"):
+        manager.refresh_token()
+    # The still-valid token keeps being served to ordinary callers.
+    assert manager.get_token() == first
+
+
+def test_refresh_token_after_close_raises(clock, mock_session):
+    manager = _manager(mock_session)
+    manager.close()
+
+    with pytest.raises(TokenRefreshError):
+        manager.refresh_token()
+
+
 # --- on_token_changed --------------------------------------------------------------
+
+
+def test_timer_firing_during_a_slow_callback_still_reschedules(clock, scheduler):
+    # The callback runs after the signing flight is closed, so a timer that fires while
+    # the callback is still running starts its own cycle instead of joining the old
+    # one, and a replacement refresh is always scheduled.
+    session = fake_session()
+    manager = _manager(session, refresh_after=0.01)
+    calls = []
+
+    def slow_callback(token):
+        calls.append(token)
+        if len(calls) == 1:
+            clock.advance(0.01)
+            scheduler.fire_pending()  # the timer fires while we are "still in" the callback
+
+    manager._on_token_changed = slow_callback
+    manager.get_token()
+
+    assert session.get_credentials.call_count == 2  # first token + the timer's refresh
+    assert len(calls) == 2
+    assert [call.delay for call in scheduler.pending] == [0.01]  # replacement scheduled
 
 
 def test_on_token_changed_receives_each_installed_token(clock, scheduler):
@@ -638,7 +805,7 @@ def test_on_token_changed_runs_outside_the_lock(clock, mock_session):
         ),
     )
 
-    token = manager.get_token()
+    token = _run_bounded(manager.get_token)  # a deadlock here must fail, not hang
 
     assert seen == [((USER, token), False)]
 
@@ -656,7 +823,9 @@ def test_on_token_changed_failure_is_logged_without_the_token(
 
     assert [r.levelname for r in caplog.records] == ["WARNING"]
     assert "on_token_changed" in caplog.text
-    assert "consumer bug" in caplog.text
+    assert "RuntimeError" in caplog.text
+    # The callback received the token, so its message might contain it: never logged.
+    assert "consumer bug" not in caplog.text
     assert token not in caplog.text
 
 
@@ -770,11 +939,38 @@ def test_close_during_signing_discards_the_token(clock):
     assert manager._cached is None
 
 
-def test_real_wait_returns_early_when_stopped():
+def test_real_wait_is_interrupted_by_close():
     stop = threading.Event()
-    stop.set()
+    waiting = threading.Thread(target=REAL_WAIT, args=(stop, 60), daemon=True)
     started = time.monotonic()
+    waiting.start()
+    time.sleep(0.1)
+    assert waiting.is_alive()  # blocked in the real wait
 
-    REAL_WAIT(stop, 60)
+    stop.set()  # what close() does
 
-    assert time.monotonic() - started < 1
+    waiting.join(timeout=5)
+    assert not waiting.is_alive()
+    assert time.monotonic() - started < 2
+
+
+# --- real scheduler ----------------------------------------------------------------
+
+
+def test_real_timer_refreshes_through_a_slow_callback(monkeypatch):
+    # End to end with the real threading.Timer and wait: a short refresh_after and a
+    # callback slower than it must still produce a steady stream of refreshes.
+    monkeypatch.setattr(token_manager, "_schedule", REAL_SCHEDULE)
+    monkeypatch.setattr(token_manager, "_wait", REAL_WAIT)
+    signed = threading.Semaphore(0)
+
+    def slow_callback(_token):
+        time.sleep(0.05)
+        signed.release()
+
+    with _manager(
+        fake_session(), refresh_after=0.02, on_token_changed=slow_callback
+    ) as m:
+        m.get_token()
+        for _ in range(3):
+            assert signed.acquire(timeout=5), "background refresh did not happen"

@@ -122,7 +122,10 @@ with ElastiCacheIAMAuthTokenManager(
 
 `get_credentials()` returns `(user_id, token)` for clients that take a no-argument
 credentials callable; `get_token()` remains available when the client takes the
-username and password separately.
+username and password separately. `refresh_token()` signs a replacement immediately
+and returns it, for a client whose `AUTH` was rejected with a token the manager still
+considers valid (for example after the signing credentials were revoked); it raises
+`TokenRefreshError` if no replacement could be signed.
 
 The region is resolved when the manager is created, but no credentials are resolved
 and no token is signed until the first `get_token()` or `get_credentials()` call.
