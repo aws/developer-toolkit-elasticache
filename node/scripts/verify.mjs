@@ -80,8 +80,12 @@ if (!changelog.includes(`## [${version}]`)) {
 }
 
 if (requiredNpm !== undefined) {
+  // Windows: npm is a .cmd shim, which Node only spawns through a shell.
   const npm = platform === "win32" ? "npm.cmd" : "npm";
-  const installed = execFileSync(npm, ["--version"], { encoding: "utf8" }).trim();
+  const installed = execFileSync(npm, ["--version"], {
+    encoding: "utf8",
+    shell: platform === "win32",
+  }).trim();
   if (olderThan(installed, requiredNpm)) {
     fail(
       `npm ${installed} is older than ${requiredNpm}, the minimum for trusted ` +
