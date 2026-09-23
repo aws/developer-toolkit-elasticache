@@ -2,7 +2,8 @@
 
 This Java library generates the IAM authentication token that Amazon ElastiCache
 requires as the connection password for an IAM-enabled user. It supports both
-serverless caches and node-based replication groups.
+serverless caches and node-based replication groups, including optional token
+caching and background refresh.
 
 ## Installation
 
@@ -69,18 +70,79 @@ Missing credentials are reported when a token is requested. Expired or otherwise
 invalid credentials cannot be detected during local signing: token generation can
 succeed, but ElastiCache will reject the token when the client connects.
 
+## Caching and background refresh
+
+`ElastiCacheIamAuthTokenProvider` is stateless and signs a new token on every
+`getToken()` call. `ElastiCacheIamAuthTokenManager` caches a token and refreshes
+it in the background:
+
+| | `ElastiCacheIamAuthTokenProvider` | `ElastiCacheIamAuthTokenManager` |
+|---|---|---|
+| Token per `getToken()` | Freshly signed every call | Cached while valid |
+| Refresh | Caller-driven | Background after `refreshAfter` |
+| Refresh failures | Surfaced to the caller | Retried while the current token is valid |
+| Change notification | None | `onTokenChanged` |
+| Cleanup | None needed | `close()` |
+
+```java
+import java.time.Duration;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.elasticache.auth.ElastiCacheIamAuthTokenManager;
+
+try (ElastiCacheIamAuthTokenManager auth =
+        ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName("my-cache")
+                .userId("iam-user")
+                .region(Region.US_EAST_1)
+                .refreshAfter(Duration.ofMinutes(5))
+                .onTokenChanged(token ->
+                        System.out.println("Installed a new IAM auth token"))
+                .build()) {
+    ElastiCacheIamAuthTokenManager.Credentials credentials = auth.getCredentials();
+    String username = credentials.getUserId();
+    String password = credentials.getToken();
+}
+```
+
+The first token is generated lazily. Concurrent callers share one initial token
+generation, and subsequent calls return the cached token while it is valid.
+Refresh starts after 5 minutes by default; `refreshAfter(...)` accepts values from
+1 millisecond up to, but not including, 14 minutes 40 seconds. The manager reserves
+the final 20 seconds of the service's 15-minute token lifetime for clock skew and
+in-transit reconnects. Token-change callbacks run on the manager's refresh thread
+after the new token is available to callers and should return quickly so they do
+not delay that manager's next refresh.
+
+A refresh makes up to 8 attempts with jittered exponential backoff capped at 5
+seconds. If refresh fails while the cached token is still valid, callers continue
+to receive that token and another refresh is scheduled. If the token expires
+before it can be replaced, `getToken()` throws `TokenRefreshException` with the
+last refresh failure as its cause.
+
+The refresh thread is a daemon and does not keep the JVM alive. Close the manager
+to cancel background work; token requests after close throw
+`TokenRefreshException`.
+
+Use the manager when a client reconnects often or requests credentials more
+frequently than the token lifetime. Use the provider when every request should
+sign a new token.
+
 ## Reconnecting clients
 
 Clients should request fresh credentials whenever they connect or reconnect. The
 Lettuce example implements `RedisCredentialsProvider` so each credentials request
-calls `getToken()`:
+uses the manager's current token:
 
 ```java
 RedisCredentialsProvider credentialsProvider = new RedisCredentialsProvider() {
     @Override
     public Mono<RedisCredentials> resolveCredentials() {
-        return Mono.fromSupplier(
-                () -> RedisCredentials.just(auth.getUserId(), auth.getToken()));
+        return Mono.fromSupplier(() -> {
+            ElastiCacheIamAuthTokenManager.Credentials credentials =
+                    auth.getCredentials();
+            return RedisCredentials.just(
+                    credentials.getUserId(), credentials.getToken());
+        });
     }
 };
 ```

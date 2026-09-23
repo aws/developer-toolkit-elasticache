@@ -53,7 +53,7 @@ String password = auth.getToken();
 ```
 
 See the [Java README](java/README.md) for Maven setup, region and credential
-resolution, and a standalone TLS connection example.
+resolution, token caching and background refresh, and connection examples.
 
 ### Node.js
 
