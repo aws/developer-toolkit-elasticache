@@ -13,7 +13,7 @@
 // and exits non-zero on the first failure.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { argv, env, exit, platform, stdout } from "node:process";
 import { URL } from "node:url";
 
@@ -25,9 +25,20 @@ function fail(message) {
   exit(1);
 }
 
+function versionParts(value, what) {
+  const parts = value.split(".").map(Number);
+  if (parts.some((part) => !Number.isInteger(part) || part < 0)) {
+    fail(`${what} is not a dotted numeric version: ${value}`);
+  }
+  return parts;
+}
+
 /** True when dotted version `a` is older than `b`. */
 function olderThan(a, b) {
-  const [left, right] = [a, b].map((value) => value.split(".").map(Number));
+  const [left, right] = [
+    versionParts(a, "the installed npm version"),
+    versionParts(b, "--require-npm"),
+  ];
   for (let i = 0; i < Math.max(left.length, right.length); i++) {
     const [l, r] = [left[i] ?? 0, right[i] ?? 0];
     if (l !== r) {
@@ -40,6 +51,9 @@ function olderThan(a, b) {
 const args = argv.slice(2);
 const flagIndex = args.indexOf("--require-npm");
 const requiredNpm = flagIndex === -1 ? undefined : args[flagIndex + 1];
+if (flagIndex !== -1 && (requiredNpm === undefined || requiredNpm.startsWith("-"))) {
+  fail("--require-npm needs a version, for example --require-npm 11.5.1.");
+}
 const positional =
   flagIndex === -1 ? args : args.filter((_, i) => i !== flagIndex && i !== flagIndex + 1);
 const tag = positional[0] ?? env.GITHUB_REF_NAME ?? "";
@@ -62,6 +76,15 @@ if (packageJson.private === true) {
       "the open-source review has cleared.",
   );
 }
+
+const prerelease = version.split("-")[1];
+if (prerelease !== undefined && !/^rc\.\d+$/.test(prerelease)) {
+  fail(
+    `Version ${version} has prerelease suffix "-${prerelease}". Only release ` +
+      "versions (X.Y.Z) and release candidates (X.Y.Z-rc.N) are published.",
+  );
+}
+const distTag = prerelease === undefined ? "latest" : "next";
 
 const repositoryUrl =
   typeof packageJson.repository === "string"
@@ -94,4 +117,7 @@ if (requiredNpm !== undefined) {
   }
 }
 
-stdout.write(`Publishing version ${version}.\n`);
+if (env.GITHUB_OUTPUT) {
+  appendFileSync(env.GITHUB_OUTPUT, `dist_tag=${distTag}\n`);
+}
+stdout.write(`Publishing version ${version} with dist-tag ${distTag}.\n`);

@@ -3,7 +3,14 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +33,7 @@ function runVerify(
   args: string[],
   packageJson: Record<string, unknown>,
   changelog = CHANGELOG_WITH_ENTRY,
+  env: Record<string, string> = { GITHUB_REF_NAME: "" },
 ) {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "elasticache-node-verify-"));
   const scriptsDirectory = join(temporaryRoot, "scripts");
@@ -38,7 +46,7 @@ function runVerify(
     writeFileSync(join(temporaryRoot, "CHANGELOG.md"), changelog);
     return spawnSync(process.execPath, [temporaryScript, ...args], {
       encoding: "utf8",
-      env: { ...process.env, GITHUB_REF_NAME: "" },
+      env: { ...process.env, ...env },
     });
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
@@ -49,28 +57,15 @@ test("accepts a matching tag on a publishable package", () => {
   const result = runVerify(["node-v1.2.3"], RELEASABLE);
 
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /Publishing version 1\.2\.3\./);
+  assert.match(result.stdout, /Publishing version 1\.2\.3 with dist-tag latest\./);
 });
 
 test("reads the tag from GITHUB_REF_NAME when no argument is given", () => {
-  const temporaryRoot = mkdtempSync(join(tmpdir(), "elasticache-node-verify-"));
-  try {
-    mkdirSync(join(temporaryRoot, "scripts"));
-    copyFileSync(SCRIPT_PATH, join(temporaryRoot, "scripts", "verify.mjs"));
-    writeFileSync(join(temporaryRoot, "package.json"), JSON.stringify(RELEASABLE));
-    writeFileSync(join(temporaryRoot, "CHANGELOG.md"), CHANGELOG_WITH_ENTRY);
-    const result = spawnSync(
-      process.execPath,
-      [join(temporaryRoot, "scripts", "verify.mjs")],
-      {
-        encoding: "utf8",
-        env: { ...process.env, GITHUB_REF_NAME: "node-v1.2.3" },
-      },
-    );
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
-  }
+  const result = runVerify([], RELEASABLE, CHANGELOG_WITH_ENTRY, {
+    GITHUB_REF_NAME: "node-v1.2.3",
+  });
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 const rejectedCases: {
@@ -112,6 +107,38 @@ const rejectedCases: {
     expectedError: /CHANGELOG\.md has no "## \[1\.2\.3\]" entry/,
   },
   {
+    name: "rejects a prerelease that is not a release candidate",
+    args: ["node-v1.2.3-beta.1"],
+    packageJson: { ...RELEASABLE, version: "1.2.3-beta.1" },
+    changelog: "# Changelog\n\n## [1.2.3-beta.1] - 2026-01-01\n\n- Something.\n",
+    expectedError: /Only release versions .* and release candidates/,
+  },
+  {
+    name: "rejects a dev version",
+    args: ["node-v0.1.0-dev.0"],
+    packageJson: { ...RELEASABLE, version: "0.1.0-dev.0" },
+    changelog: "# Changelog\n\n## [0.1.0-dev.0] - 2026-01-01\n\n- Something.\n",
+    expectedError: /prerelease suffix "-dev.0"/,
+  },
+  {
+    name: "rejects --require-npm without a value",
+    args: ["node-v1.2.3", "--require-npm"],
+    packageJson: RELEASABLE,
+    expectedError: /--require-npm needs a version/,
+  },
+  {
+    name: "rejects --require-npm followed by another flag",
+    args: ["node-v1.2.3", "--require-npm", "--whatever"],
+    packageJson: RELEASABLE,
+    expectedError: /--require-npm needs a version/,
+  },
+  {
+    name: "rejects a non-numeric --require-npm value",
+    args: ["node-v1.2.3", "--require-npm", "eleven"],
+    packageJson: RELEASABLE,
+    expectedError: /not a dotted numeric version/,
+  },
+  {
     name: "rejects an npm older than the required version",
     args: ["node-v1.2.3", "--require-npm", "999.0.0"],
     packageJson: RELEASABLE,
@@ -128,6 +155,39 @@ for (const testCase of rejectedCases) {
     assert.match(result.stdout, testCase.expectedError);
   });
 }
+
+const RC = { ...RELEASABLE, version: "1.2.3-rc.1" };
+const RC_CHANGELOG = "# Changelog\n\n## [1.2.3-rc.1] - 2026-01-01\n\n- Something.\n";
+
+test("publishes a release under the latest dist-tag", () => {
+  const result = runVerify(["node-v1.2.3"], RELEASABLE);
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /with dist-tag latest\./);
+});
+
+test("publishes a release candidate under the next dist-tag", () => {
+  const result = runVerify(["node-v1.2.3-rc.1"], RC, RC_CHANGELOG);
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /with dist-tag next\./);
+});
+
+test("writes the dist-tag to GITHUB_OUTPUT when set", () => {
+  const outputDirectory = mkdtempSync(join(tmpdir(), "elasticache-gh-output-"));
+  const outputFile = join(outputDirectory, "out");
+  try {
+    const result = runVerify(["node-v1.2.3-rc.1"], RC, RC_CHANGELOG, {
+      GITHUB_REF_NAME: "",
+      GITHUB_OUTPUT: outputFile,
+    });
+
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(readFileSync(outputFile, "utf8"), "dist_tag=next\n");
+  } finally {
+    rmSync(outputDirectory, { recursive: true, force: true });
+  }
+});
 
 test("accepts an npm at or above the required version", () => {
   const result = runVerify(["node-v1.2.3", "--require-npm", "1.0.0"], RELEASABLE);
