@@ -18,6 +18,8 @@ and this package uses [Semantic Versioning](https://semver.org/).
 - `ElastiCacheIamAuthTokenManager` for caching tokens, refreshing them in the
   background before expiry, retrying transient failures, and notifying a
   token-change callback.
+- `ElastiCacheIamAuthTokenManager.refreshToken()` for replacing a rejected cached
+  token immediately while sharing concurrent and background refresh work.
 - `TokenRefreshException` for closed managers and refreshes that cannot replace
   an expired token.
 - Maven build, Java version CI matrix, documentation, and dependency updates.

@@ -158,6 +158,32 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     }
 
     /**
+     * Forces an immediate token refresh.
+     *
+     * <p>The currently cached token is invalidated before new AWS credentials are
+     * resolved and a replacement token is signed. Concurrent token callers share
+     * the same refresh, including a background refresh already in progress.
+     *
+     * <p>Use this operation after a client rejects the cached token. Discard the
+     * rejected connection before opening a replacement connection with the
+     * returned token.
+     *
+     * @return newly installed IAM authentication token
+     * @throws TokenRefreshException if the manager is closed
+     * @throws ConfigurationException if usable AWS credentials cannot be resolved
+     */
+    public String refreshToken() {
+        synchronized (lock) {
+            ensureOpen();
+            cached = null;
+            cancel(refreshTask);
+            refreshTask = null;
+            retryNotBefore = 0;
+        }
+        return await(refresh());
+    }
+
+    /**
      * Stops all background work and releases the manager's scheduler.
      *
      * <p>Subsequent token requests throw {@link TokenRefreshException}.

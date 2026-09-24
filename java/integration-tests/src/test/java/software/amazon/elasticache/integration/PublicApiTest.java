@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Method;
+
 import org.junit.jupiter.api.Test;
 import software.amazon.elasticache.auth.ConfigurationException;
 import software.amazon.elasticache.auth.ElastiCacheIamAuthTokenManager;
@@ -18,9 +20,11 @@ import software.amazon.elasticache.auth.ToolkitInputException;
 
 class PublicApiTest {
     @Test
-    void installedArtifactExposesPublicApi() {
+    void installedArtifactExposesPublicApi() throws Exception {
         assertNotNull(ElastiCacheIamAuthTokenProvider.builder());
         assertNotNull(ElastiCacheIamAuthTokenManager.builder());
+        Method refreshToken = ElastiCacheIamAuthTokenManager.class.getMethod("refreshToken");
+        assertTrue(refreshToken.getReturnType().equals(String.class));
         assertTrue(ToolkitInputException.class.isAssignableFrom(ConfigurationException.class));
         assertTrue(ToolkitInputException.class.isAssignableFrom(InvalidParameterException.class));
         assertFalse(ToolkitInputException.class.isAssignableFrom(TokenRefreshException.class));
