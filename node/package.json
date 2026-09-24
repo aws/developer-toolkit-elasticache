@@ -46,7 +46,6 @@
     "lint": "eslint .",
     "list-supported-versions": "node scripts/list-supported-versions.mjs",
     "verify": "node scripts/verify.mjs",
-    "smoke": "node scripts/smoke.mjs",
     "package:check": "npm run clean && npm run build && npm pack --dry-run",
     "test": "npm run build && npm run build:test && node --test dist-test/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -1,8 +1,7 @@
 name: Publish Node package to npm
 
-# Follows https://docs.npmjs.com/trusted-publishers. The npm trusted publisher must
-# reference this exact filename and the `npm` environment, or OIDC publishing is
-# rejected. Provenance is generated automatically by trusted publishing.
+# The npm trusted publisher must reference this exact filename and the `npm`
+# environment (https://docs.npmjs.com/trusted-publishers).
 
 on:
   release:
@@ -37,7 +36,7 @@ jobs:
 
   # Full support matrix gates the release. Ubuntu only: the package is pure JavaScript
   # and the CI workflow already covers Windows and macOS. No dependency caching in
-  # release builds, per npm's trusted-publishing guidance.
+  # release jobs, per npm's trusted-publishing guidance.
   test:
     name: test (Node ${{ matrix.node-version }})
     needs: versions
@@ -60,12 +59,11 @@ jobs:
           node-version: ${{ matrix.node-version }}
           package-manager-cache: false
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run the test suite
+      - name: Install and run the test suite
         timeout-minutes: 10
-        run: npm test
+        run: |
+          npm ci
+          npm test
 
   build:
     name: build and verify
@@ -73,9 +71,6 @@ jobs:
     if: startsWith(github.ref_name, 'node-v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: node
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,26 +81,35 @@ jobs:
           node-version: ${{ fromJson(needs.versions.outputs.data).max }}
           package-manager-cache: false
 
-      - name: Install dependencies
-        run: npm ci
-
       # Tag must match package.json's version, `private` must be gone, CHANGELOG must
       # have an entry, and repository.url must be set (provenance verifies it).
       - name: Verify the tag matches the packaged version and the package is publishable
+        working-directory: node
         run: npm run --silent verify -- "$GITHUB_REF_NAME"
 
-      - name: Build and validate the package contents
+      - name: Build and pack the tarball
+        working-directory: node
         timeout-minutes: 5
         run: |
+          npm ci
           npm run build
-          npm pack --dry-run
+          mkdir pack
+          npm pack --pack-destination pack
+
+      - name: Save the tarball for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-dist
+          path: node/pack/
+          if-no-files-found: error  # an empty artifact silently breaks the publish job
 
   publish:
     name: publish
     needs: [versions, build]
-    if: startsWith(github.ref_name, 'node-v')
+    # A fork that copies this workflow and its tags can never publish.
+    if: startsWith(github.ref_name, 'node-v') && github.repository_owner == 'aws'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     # Must match the environment name on the npm trusted publisher; carries the
     # required-reviewer gate so a run alone cannot publish.
     environment: npm
@@ -113,13 +117,12 @@ jobs:
       # Job permissions REPLACE the top-level block, so restate contents: read.
       contents: read
       id-token: write  # OIDC token for npm trusted publishing
-    defaults:
-      run:
-        working-directory: node
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # No NODE_AUTH_TOKEN: auth comes from the OIDC token, which npm >= 11.5.1 uses
+      # automatically.
       - name: Set up Node.js
         uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
@@ -127,19 +130,21 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      # Trusted publishing needs npm >= 11.5.1; the newest supported Node bundles a
-      # newer one, so assert rather than install npm from the registry at publish time.
+      # The newest supported Node bundles npm >= 11.5.1; assert it rather than install
+      # npm from the registry at publish time.
       - name: Verify again on the publishing runner, including the npm version
+        working-directory: node
         run: npm run --silent verify -- "$GITHUB_REF_NAME" --require-npm 11.5.1
 
-      - name: Install dependencies and build
-        run: |
-          npm ci
-          npm run build
+      - name: Retrieve the tarball from the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: node-dist
+          path: node/pack/
 
-      # OIDC: no token, no --provenance flag; publishConfig.access is public.
-      - name: Publish to npm
-        run: npm publish
+      - name: Publish to npm with provenance
+        run: npm publish node/pack/*.tgz --provenance --access public
 
+      # Retries for ~13 minutes (20 x 40s): the registry lags behind a publish.
       - name: Smoke-test the published package
-        run: npm run --silent smoke -- "${GITHUB_REF_NAME#node-v}"
+        run: python3 scripts/node_dev.py smoke "${GITHUB_REF_NAME#node-v}"
