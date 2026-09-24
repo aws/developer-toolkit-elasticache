@@ -20,6 +20,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -147,6 +149,7 @@ class ElastiCacheIamAuthTokenManagerTest {
         CountDownLatch replacementStarted = new CountDownLatch(1);
         CountDownLatch shared = new CountDownLatch(3);
         CountDownLatch releaseReplacement = new CountDownLatch(1);
+        ExecutorService callers = Executors.newFixedThreadPool(4);
         ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
                 .serverlessCacheName(CACHE)
                 .userId(USER)
@@ -167,14 +170,14 @@ class ElastiCacheIamAuthTokenManagerTest {
         try {
             String rejected = manager.getToken();
             CompletableFuture<String> first =
-                    CompletableFuture.supplyAsync(manager::refreshToken);
+                    CompletableFuture.supplyAsync(manager::refreshToken, callers);
             await(replacementStarted);
             CompletableFuture<String> second =
-                    CompletableFuture.supplyAsync(manager::refreshToken);
+                    CompletableFuture.supplyAsync(manager::refreshToken, callers);
             CompletableFuture<String> token =
-                    CompletableFuture.supplyAsync(manager::getToken);
+                    CompletableFuture.supplyAsync(manager::getToken, callers);
             CompletableFuture<ElastiCacheIamAuthTokenManager.Credentials> credentials =
-                    CompletableFuture.supplyAsync(manager::getCredentials);
+                    CompletableFuture.supplyAsync(manager::getCredentials, callers);
             await(shared);
             releaseReplacement.countDown();
 
@@ -187,6 +190,7 @@ class ElastiCacheIamAuthTokenManagerTest {
         } finally {
             releaseReplacement.countDown();
             manager.close();
+            callers.shutdownNow();
         }
     }
 
