@@ -36,6 +36,8 @@ PYPROJECT = PYTHON_DIR / "pyproject.toml"
 PACKAGE = "developer-toolkit-elasticache"
 IMPORT_NAME = "developer_toolkit_elasticache"
 DO_NOT_UPLOAD = "Private :: Do Not Upload"
+# Release versions (X.Y.Z) and release candidates (X.Y.ZrcN, PEP 440).
+_PUBLISHABLE_VERSION = re.compile(r"\d+\.\d+\.\d+(rc\d+)?")
 
 
 _COMMANDS = {
@@ -150,6 +152,12 @@ def verify(args: argparse.Namespace) -> int:
             f"({pkg_version}). Bump the version and re-tag."
         )
         return 1
+    if not _PUBLISHABLE_VERSION.fullmatch(pkg_version):
+        print(
+            f"::error::Version {pkg_version} is not publishable. Only release versions "
+            "(X.Y.Z) and release candidates (X.Y.ZrcN) are published."
+        )
+        return 1
     if DO_NOT_UPLOAD in project.get("classifiers", []):
         print(
             f"::error::The '{DO_NOT_UPLOAD}' classifier is still set. Remove it in the "
@@ -160,7 +168,8 @@ def verify(args: argparse.Namespace) -> int:
     if drift:
         print(f"::error::{drift}")
         return 1
-    print(f"Publishing version {pkg_version}.")
+    kind = "release candidate" if "rc" in pkg_version else "release"
+    print(f"Publishing version {pkg_version} ({kind}).")
     return 0
 
 
