@@ -2,6 +2,13 @@
   "name": "@aws/developer-toolkit-elasticache",
   "version": "0.1.0-dev.0",
   "description": "Developer toolkit for Amazon ElastiCache",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aws/developer-toolkit-elasticache.git",
+    "directory": "node"
+  },
+  "homepage": "https://github.com/aws/developer-toolkit-elasticache/tree/main/node#readme",
+  "bugs": "https://github.com/aws/developer-toolkit-elasticache/issues",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -19,6 +26,9 @@
     "NOTICE",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -35,6 +45,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "list-supported-versions": "node scripts/list-supported-versions.mjs",
+    "verify": "node scripts/verify.mjs",
     "package:check": "npm run clean && npm run build && npm pack --dry-run",
     "test": "npm run build && npm run build:test && node --test dist-test/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
