@@ -6,14 +6,15 @@
 //   node scripts/verify.mjs [TAG] [--require-npm <version>]
 //
 // Checks that the release tag matches package.json's version, that the package is no
-// longer marked private (the publish guard), that CHANGELOG.md has an entry for the
-// version, and that package.json declares the repository (npm provenance requires it).
+// longer marked private (the publish guard), that the version is not a prerelease, that
+// CHANGELOG.md has an entry for the version, and that package.json declares the
+// repository.
 // With --require-npm, also checks the local npm is at least that version, which the
 // publish job needs for trusted publishing. Prints a GitHub Actions error annotation
 // and exits non-zero on the first failure.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { argv, env, exit, platform, stdout } from "node:process";
 import { URL } from "node:url";
 
@@ -77,14 +78,11 @@ if (packageJson.private === true) {
   );
 }
 
-const prerelease = version.split("-")[1];
-if (prerelease !== undefined && !/^rc\.\d+$/.test(prerelease)) {
+if (version.includes("-")) {
   fail(
-    `Version ${version} has prerelease suffix "-${prerelease}". Only release ` +
-      "versions (X.Y.Z) and release candidates (X.Y.Z-rc.N) are published.",
+    `Version ${version} is a prerelease. Only release versions (X.Y.Z) are published.`,
   );
 }
-const distTag = prerelease === undefined ? "latest" : "next";
 
 const repositoryUrl =
   typeof packageJson.repository === "string"
@@ -117,7 +115,4 @@ if (requiredNpm !== undefined) {
   }
 }
 
-if (env.GITHUB_OUTPUT) {
-  appendFileSync(env.GITHUB_OUTPUT, `dist_tag=${distTag}\n`);
-}
-stdout.write(`Publishing version ${version} with dist-tag ${distTag}.\n`);
+stdout.write(`Publishing version ${version}.\n`);

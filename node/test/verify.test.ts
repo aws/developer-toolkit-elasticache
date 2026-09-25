@@ -3,14 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,7 +50,7 @@ test("accepts a matching tag on a publishable package", () => {
   const result = runVerify(["node-v1.2.3"], RELEASABLE);
 
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /Publishing version 1\.2\.3 with dist-tag latest\./);
+  assert.match(result.stdout, /Publishing version 1\.2\.3\./);
 });
 
 test("reads the tag from GITHUB_REF_NAME when no argument is given", () => {
@@ -107,18 +100,18 @@ const rejectedCases: {
     expectedError: /CHANGELOG\.md has no "## \[1\.2\.3\]" entry/,
   },
   {
-    name: "rejects a prerelease that is not a release candidate",
-    args: ["node-v1.2.3-beta.1"],
-    packageJson: { ...RELEASABLE, version: "1.2.3-beta.1" },
-    changelog: "# Changelog\n\n## [1.2.3-beta.1] - 2026-01-01\n\n- Something.\n",
-    expectedError: /Only release versions .* and release candidates/,
+    name: "rejects a release candidate",
+    args: ["node-v1.2.3-rc.1"],
+    packageJson: { ...RELEASABLE, version: "1.2.3-rc.1" },
+    changelog: "# Changelog\n\n## [1.2.3-rc.1] - 2026-01-01\n\n- Something.\n",
+    expectedError: /1\.2\.3-rc\.1 is a prerelease/,
   },
   {
     name: "rejects a dev version",
     args: ["node-v0.1.0-dev.0"],
     packageJson: { ...RELEASABLE, version: "0.1.0-dev.0" },
     changelog: "# Changelog\n\n## [0.1.0-dev.0] - 2026-01-01\n\n- Something.\n",
-    expectedError: /prerelease suffix "-dev.0"/,
+    expectedError: /0\.1\.0-dev\.0 is a prerelease/,
   },
   {
     name: "rejects --require-npm without a value",
@@ -155,39 +148,6 @@ for (const testCase of rejectedCases) {
     assert.match(result.stdout, testCase.expectedError);
   });
 }
-
-const RC = { ...RELEASABLE, version: "1.2.3-rc.1" };
-const RC_CHANGELOG = "# Changelog\n\n## [1.2.3-rc.1] - 2026-01-01\n\n- Something.\n";
-
-test("publishes a release under the latest dist-tag", () => {
-  const result = runVerify(["node-v1.2.3"], RELEASABLE);
-
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /with dist-tag latest\./);
-});
-
-test("publishes a release candidate under the next dist-tag", () => {
-  const result = runVerify(["node-v1.2.3-rc.1"], RC, RC_CHANGELOG);
-
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /with dist-tag next\./);
-});
-
-test("writes the dist-tag to GITHUB_OUTPUT when set", () => {
-  const outputDirectory = mkdtempSync(join(tmpdir(), "elasticache-gh-output-"));
-  const outputFile = join(outputDirectory, "out");
-  try {
-    const result = runVerify(["node-v1.2.3-rc.1"], RC, RC_CHANGELOG, {
-      GITHUB_REF_NAME: "",
-      GITHUB_OUTPUT: outputFile,
-    });
-
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.equal(readFileSync(outputFile, "utf8"), "dist_tag=next\n");
-  } finally {
-    rmSync(outputDirectory, { recursive: true, force: true });
-  }
-});
 
 test("accepts an npm at or above the required version", () => {
   const result = runVerify(["node-v1.2.3", "--require-npm", "1.0.0"], RELEASABLE);

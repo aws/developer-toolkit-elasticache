@@ -132,9 +132,7 @@ jobs:
 
       # The newest supported Node bundles npm >= 11.5.1; assert it rather than install
       # npm from the registry at publish time.
-      # Also decides the dist-tag: `latest` for releases, `next` for X.Y.Z-rc.N.
       - name: Verify again on the publishing runner, including the npm version
-        id: verify
         working-directory: node
         run: npm run --silent verify -- "$GITHUB_REF_NAME" --require-npm 11.5.1
 
@@ -145,7 +143,7 @@ jobs:
           path: node/pack/
 
       - name: Publish to npm with provenance
-        run: npm publish node/pack/*.tgz --provenance --access public --tag "${{ steps.verify.outputs.dist_tag }}"
+        run: npm publish node/pack/*.tgz --provenance --access public
 
       # Retries for ~13 minutes (20 x 40s): the registry lags behind a publish.
       - name: Smoke-test the published package
