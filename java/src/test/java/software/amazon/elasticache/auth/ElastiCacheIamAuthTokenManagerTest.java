@@ -16,10 +16,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -117,6 +120,164 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
+    void forcedRefreshUsesRotatedCredentialsAndResetsScheduling() {
+        Harness harness = new Harness();
+        try {
+            String first = harness.manager.getToken();
+            TestTask originalRefresh = harness.scheduler.lastCreated();
+
+            String replacement = harness.manager.refreshToken();
+
+            assertNotEquals(first, replacement);
+            assertEquals(replacement, harness.manager.getToken());
+            assertEquals(2, harness.credentialCalls.get());
+            assertEquals(Arrays.asList(first, replacement), harness.changedTokens);
+            assertTrue(originalRefresh.cancelled);
+            assertEquals(300_000, harness.scheduler.lastCreated().delayMillis);
+            harness.scheduler.advance(299_999);
+            assertEquals(2, harness.credentialCalls.get());
+            harness.scheduler.advance(1);
+            assertEquals(3, harness.credentialCalls.get());
+        } finally {
+            harness.manager.close();
+        }
+    }
+
+    @Test
+    void concurrentForcedRefreshesAndTokenCallersShareReplacement() {
+        TestScheduler scheduler = new TestScheduler();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        CountDownLatch replacementStarted = new CountDownLatch(1);
+        CountDownLatch shared = new CountDownLatch(3);
+        CountDownLatch releaseReplacement = new CountDownLatch(1);
+        ExecutorService callers = Executors.newFixedThreadPool(4);
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    int call = credentialCalls.incrementAndGet();
+                    if (call > 1) {
+                        replacementStarted.countDown();
+                        await(releaseReplacement);
+                    }
+                    return call == 1 ? FIRST_CREDENTIALS : ROTATED_CREDENTIALS;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .onSharedRefresh(shared::countDown)
+                .build();
+        try {
+            String rejected = manager.getToken();
+            CompletableFuture<String> first =
+                    CompletableFuture.supplyAsync(manager::refreshToken, callers);
+            await(replacementStarted);
+            CompletableFuture<String> second =
+                    CompletableFuture.supplyAsync(manager::refreshToken, callers);
+            CompletableFuture<String> token =
+                    CompletableFuture.supplyAsync(manager::getToken, callers);
+            CompletableFuture<ElastiCacheIamAuthTokenManager.Credentials> credentials =
+                    CompletableFuture.supplyAsync(manager::getCredentials, callers);
+            await(shared);
+            releaseReplacement.countDown();
+
+            String replacement = first.join();
+            assertNotEquals(rejected, replacement);
+            assertEquals(replacement, second.join());
+            assertEquals(replacement, token.join());
+            assertEquals(replacement, credentials.join().getToken());
+            assertEquals(2, credentialCalls.get());
+        } finally {
+            releaseReplacement.countDown();
+            manager.close();
+            callers.shutdownNow();
+        }
+    }
+
+    @Test
+    void forcedRefreshJoinsBackgroundRefreshWithoutStaleOverwrite() {
+        TestScheduler scheduler = new TestScheduler();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        CountDownLatch backgroundStarted = new CountDownLatch(1);
+        CountDownLatch shared = new CountDownLatch(1);
+        CountDownLatch releaseBackground = new CountDownLatch(1);
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    int call = credentialCalls.incrementAndGet();
+                    if (call > 1) {
+                        backgroundStarted.countDown();
+                        await(releaseBackground);
+                    }
+                    return call == 1 ? FIRST_CREDENTIALS : ROTATED_CREDENTIALS;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .onSharedRefresh(shared::countDown)
+                .build();
+        try {
+            String rejected = manager.getToken();
+            CompletableFuture<Void> background =
+                    CompletableFuture.runAsync(() -> scheduler.advance(300_000));
+            await(backgroundStarted);
+            CompletableFuture<String> forced =
+                    CompletableFuture.supplyAsync(manager::refreshToken);
+            await(shared);
+            releaseBackground.countDown();
+
+            String replacement = forced.join();
+            background.join();
+            assertNotEquals(rejected, replacement);
+            assertEquals(replacement, manager.getToken());
+            assertEquals(2, credentialCalls.get());
+            assertEquals(2, scheduler.createdCount());
+        } finally {
+            releaseBackground.countDown();
+            manager.close();
+        }
+    }
+
+    @Test
+    void failedForcedRefreshDoesNotReturnInvalidatedToken() {
+        TestScheduler scheduler = new TestScheduler();
+        AtomicInteger credentialCalls = new AtomicInteger();
+        AtomicBoolean failing = new AtomicBoolean();
+        CountDownLatch shared = new CountDownLatch(1);
+        ElastiCacheIamAuthTokenManager manager =
+                baseBuilder(scheduler, credentialCalls, failing)
+                        .onSharedRefresh(shared::countDown)
+                        .build();
+        try {
+            String rejected = manager.getToken();
+            failing.set(true);
+            CompletableFuture<Throwable> forced = CompletableFuture.supplyAsync(
+                    () -> captureFailure(manager::refreshToken));
+            awaitCreatedTasks(scheduler, 2);
+            CompletableFuture<Throwable> concurrent = CompletableFuture.supplyAsync(
+                    () -> captureFailure(manager::getToken));
+            await(shared);
+            scheduler.advance(12_000);
+
+            Throwable forcedFailure = forced.join();
+            Throwable concurrentFailure = concurrent.join();
+            assertTrue(forcedFailure instanceof ConfigurationException);
+            assertSame(forcedFailure, concurrentFailure);
+            assertFalse(forcedFailure.getMessage().contains(rejected));
+            assertEquals(9, credentialCalls.get());
+
+            failing.set(false);
+            assertNotEquals(rejected, manager.getToken());
+            assertEquals(10, credentialCalls.get());
+        } finally {
+            manager.close();
+        }
+    }
+
+    @Test
     void sharesInitialTokenGenerationAcrossConcurrentCallers() {
         TestScheduler scheduler = new TestScheduler();
         AtomicInteger credentialCalls = new AtomicInteger();
@@ -181,7 +342,7 @@ class ElastiCacheIamAuthTokenManagerTest {
         assertTrue(result.join() instanceof ConfigurationException);
         assertEquals(8, harness.credentialCalls.get());
         assertEquals(
-                java.util.Arrays.asList(100L, 200L, 400L, 800L, 1_600L, 3_200L, 5_000L),
+                Arrays.asList(100L, 200L, 400L, 800L, 1_600L, 3_200L, 5_000L),
                 harness.scheduler.delays());
         harness.manager.close();
     }
@@ -408,6 +569,49 @@ class ElastiCacheIamAuthTokenManagerTest {
 
         assertEquals(1, harness.credentialCalls.get());
         assertThrows(TokenRefreshException.class, harness.manager::getToken);
+        assertThrows(TokenRefreshException.class, harness.manager::refreshToken);
+    }
+
+    @Test
+    void closeCancelsForcedRefreshInFlight() {
+        TestScheduler scheduler = new TestScheduler();
+        CountDownLatch replacementStarted = new CountDownLatch(1);
+        CountDownLatch releaseReplacement = new CountDownLatch(1);
+        AtomicInteger credentialCalls = new AtomicInteger();
+        ElastiCacheIamAuthTokenManager manager = ElastiCacheIamAuthTokenManager.builder()
+                .serverlessCacheName(CACHE)
+                .userId(USER)
+                .region(Region.US_EAST_1)
+                .credentialsProvider(() -> {
+                    int call = credentialCalls.incrementAndGet();
+                    if (call > 1) {
+                        replacementStarted.countDown();
+                        await(releaseReplacement);
+                    }
+                    return call == 1 ? FIRST_CREDENTIALS : ROTATED_CREDENTIALS;
+                })
+                .signingClock(SIGNING_CLOCK)
+                .currentTimeMillis(scheduler::now)
+                .scheduler(scheduler)
+                .build();
+        try {
+            manager.getToken();
+            CompletableFuture<Throwable> result = CompletableFuture.supplyAsync(
+                    () -> captureFailure(manager::refreshToken));
+            await(replacementStarted);
+            manager.close();
+            releaseReplacement.countDown();
+
+            Throwable failure = result.join();
+            assertTrue(failure instanceof TokenRefreshException);
+            assertEquals(
+                    "Token refresh was cancelled because the token manager was closed.",
+                    failure.getMessage());
+            assertEquals(1, scheduler.createdCount());
+        } finally {
+            releaseReplacement.countDown();
+            manager.close();
+        }
     }
 
     @Test
@@ -481,7 +685,7 @@ class ElastiCacheIamAuthTokenManagerTest {
 
     @Test
     void validatesRefreshInterval() {
-        for (Duration value : java.util.Arrays.asList(
+        for (Duration value : Arrays.asList(
                 Duration.ZERO,
                 Duration.ofMillis(-1),
                 Duration.ofNanos(1),

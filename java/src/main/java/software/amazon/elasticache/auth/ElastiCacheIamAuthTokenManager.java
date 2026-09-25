@@ -158,6 +158,33 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     }
 
     /**
+     * Forces a token refresh without waiting for the scheduled refresh.
+     *
+     * <p>The currently cached token is invalidated before new AWS credentials are
+     * resolved and a replacement token is signed. Concurrent token callers share
+     * the same refresh, including a background refresh already in progress or in
+     * retry backoff.
+     *
+     * <p>Use this operation after a client rejects the cached token. Discard the
+     * rejected connection before opening a replacement connection with the
+     * returned token.
+     *
+     * @return newly installed IAM authentication token
+     * @throws TokenRefreshException if the manager is closed
+     * @throws ConfigurationException if usable AWS credentials cannot be resolved
+     */
+    public String refreshToken() {
+        synchronized (lock) {
+            ensureOpen();
+            cached = null;
+            cancel(refreshTask);
+            refreshTask = null;
+            retryNotBefore = 0;
+        }
+        return await(refresh());
+    }
+
+    /**
      * Stops all background work and releases the manager's scheduler.
      *
      * <p>Subsequent token requests throw {@link TokenRefreshException}.
@@ -285,20 +312,14 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
 
     private void finishFailedRefresh(
             CompletableFuture<String> refresh, RuntimeException lastError) {
-        String validToken = null;
         synchronized (lock) {
             long now = currentTimeMillis.getAsLong();
             if (cached != null && now < cached.expiresAt) {
-                validToken = cached.token;
                 retryNotBefore = now + MAX_DELAY_MILLIS;
                 scheduleRefreshLocked(MAX_DELAY_MILLIS);
+                refresh.complete(cached.token);
+                return;
             }
-        }
-        if (validToken != null) {
-            refresh.complete(validToken);
-            return;
-        }
-        synchronized (lock) {
             if (cached == null) {
                 refresh.completeExceptionally(lastError);
             } else {
