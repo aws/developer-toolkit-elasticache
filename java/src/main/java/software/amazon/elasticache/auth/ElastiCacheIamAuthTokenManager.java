@@ -158,11 +158,12 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
     }
 
     /**
-     * Forces an immediate token refresh.
+     * Forces a token refresh without waiting for the scheduled refresh.
      *
      * <p>The currently cached token is invalidated before new AWS credentials are
      * resolved and a replacement token is signed. Concurrent token callers share
-     * the same refresh, including a background refresh already in progress.
+     * the same refresh, including a background refresh already in progress or in
+     * retry backoff.
      *
      * <p>Use this operation after a client rejects the cached token. Discard the
      * rejected connection before opening a replacement connection with the
@@ -311,20 +312,14 @@ public final class ElastiCacheIamAuthTokenManager implements AutoCloseable {
 
     private void finishFailedRefresh(
             CompletableFuture<String> refresh, RuntimeException lastError) {
-        String validToken = null;
         synchronized (lock) {
             long now = currentTimeMillis.getAsLong();
             if (cached != null && now < cached.expiresAt) {
-                validToken = cached.token;
                 retryNotBefore = now + MAX_DELAY_MILLIS;
                 scheduleRefreshLocked(MAX_DELAY_MILLIS);
+                refresh.complete(cached.token);
+                return;
             }
-        }
-        if (validToken != null) {
-            refresh.complete(validToken);
-            return;
-        }
-        synchronized (lock) {
             if (cached == null) {
                 refresh.completeExceptionally(lastError);
             } else {

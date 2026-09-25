@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -119,7 +120,7 @@ class ElastiCacheIamAuthTokenManagerTest {
     }
 
     @Test
-    void forcedRefreshImmediatelyUsesRotatedCredentialsAndResetsScheduling() {
+    void forcedRefreshUsesRotatedCredentialsAndResetsScheduling() {
         Harness harness = new Harness();
         try {
             String first = harness.manager.getToken();
@@ -130,7 +131,7 @@ class ElastiCacheIamAuthTokenManagerTest {
             assertNotEquals(first, replacement);
             assertEquals(replacement, harness.manager.getToken());
             assertEquals(2, harness.credentialCalls.get());
-            assertEquals(java.util.Arrays.asList(first, replacement), harness.changedTokens);
+            assertEquals(Arrays.asList(first, replacement), harness.changedTokens);
             assertTrue(originalRefresh.cancelled);
             assertEquals(300_000, harness.scheduler.lastCreated().delayMillis);
             harness.scheduler.advance(299_999);
@@ -265,7 +266,7 @@ class ElastiCacheIamAuthTokenManagerTest {
             Throwable concurrentFailure = concurrent.join();
             assertTrue(forcedFailure instanceof ConfigurationException);
             assertSame(forcedFailure, concurrentFailure);
-            assertNotEquals(rejected, forcedFailure.getMessage());
+            assertFalse(forcedFailure.getMessage().contains(rejected));
             assertEquals(9, credentialCalls.get());
 
             failing.set(false);
@@ -341,7 +342,7 @@ class ElastiCacheIamAuthTokenManagerTest {
         assertTrue(result.join() instanceof ConfigurationException);
         assertEquals(8, harness.credentialCalls.get());
         assertEquals(
-                java.util.Arrays.asList(100L, 200L, 400L, 800L, 1_600L, 3_200L, 5_000L),
+                Arrays.asList(100L, 200L, 400L, 800L, 1_600L, 3_200L, 5_000L),
                 harness.scheduler.delays());
         harness.manager.close();
     }
@@ -684,7 +685,7 @@ class ElastiCacheIamAuthTokenManagerTest {
 
     @Test
     void validatesRefreshInterval() {
-        for (Duration value : java.util.Arrays.asList(
+        for (Duration value : Arrays.asList(
                 Duration.ZERO,
                 Duration.ofMillis(-1),
                 Duration.ofNanos(1),
