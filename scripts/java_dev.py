@@ -85,7 +85,8 @@ def smoke(version: str) -> None:
     base = (
         f"{CENTRAL}/{group.replace('.', '/')}/{artifact}/{version}/{artifact}-{version}"
     )
-    files = [".pom", ".jar", "-sources.jar", "-javadoc.jar", ".jar.asc"]
+    artifacts = [".pom", ".jar", "-sources.jar", "-javadoc.jar"]
+    files = artifacts + [suffix + ".asc" for suffix in artifacts]
     for attempt in range(1, SMOKE_ATTEMPTS + 1):
         missing = [suffix for suffix in files if not exists(base + suffix)]
         if not missing:

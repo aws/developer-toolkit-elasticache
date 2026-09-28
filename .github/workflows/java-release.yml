@@ -83,7 +83,7 @@ jobs:
       - name: Verify the tag matches the pom version
         run: python3 scripts/java_dev.py verify "$GITHUB_REF_NAME"
 
-      # Writes a settings.xml server `central` that reads its credentials from the
+      # Writes a settings.xml whose `central` server and GPG passphrase read the
       # environment variables named below, and imports the signing key.
       - name: Set up Java with the Central credentials and signing key
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -94,6 +94,7 @@ jobs:
           server-username: CENTRAL_TOKEN_USERNAME
           server-password: CENTRAL_TOKEN_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
       # Tests already ran in the test job. The plugin uploads, waits for validation,
       # publishes, and fails this step if any of that fails.
