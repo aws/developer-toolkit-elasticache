@@ -14,6 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 POM = ROOT / "java" / "pom.xml"
 CHANGELOG = ROOT / "java" / "CHANGELOG.md"
+DEPENDENT_POMS = [
+    ROOT / "java" / "examples" / "pom.xml",
+    ROOT / "java" / "integration-tests" / "pom.xml",
+]
 MAVEN_NAMESPACE = {"m": "http://maven.apache.org/POM/4.0.0"}
 TAG_PREFIX = "java-v"
 CENTRAL = "https://repo1.maven.org/maven2"
@@ -60,6 +64,18 @@ def verify(tag: str) -> None:
         fail(f"java/pom.xml version {version} is a SNAPSHOT; set the release version.")
     if not CHANGELOG.is_file() or f"## [{version}]" not in CHANGELOG.read_text():
         fail(f"java/CHANGELOG.md has no [{version}] entry.")
+    # The examples and integration tests depend on the published artifact.
+    for pom in DEPENDENT_POMS:
+        depends_on = (
+            ET.parse(pom)
+            .getroot()
+            .findtext(
+                f"m:dependencies/m:dependency[m:artifactId='{pom_field('artifactId')}']/m:version",
+                namespaces=MAVEN_NAMESPACE,
+            )
+        )
+        if depends_on != version:
+            fail(f"{pom.relative_to(ROOT)} depends on {depends_on}, not {version}.")
     print(f"Publishing version {version}.")
 
 

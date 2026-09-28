@@ -25,7 +25,12 @@
 
     <developers>
         <developer>
+            <id>amazonwebservices</id>
             <organization>Amazon Web Services</organization>
+            <organizationUrl>https://aws.amazon.com</organizationUrl>
+            <roles>
+                <role>developer</role>
+            </roles>
         </developer>
     </developers>
 
