@@ -119,6 +119,14 @@ to receive that token and another refresh is scheduled. If the token expires
 before it can be replaced, `getToken()` throws `TokenRefreshException` with the
 last refresh failure as its cause.
 
+Call `refreshToken()` after a client rejects the cached token. It invalidates that
+token and refreshes without waiting for the scheduled refresh, resolving AWS
+credentials again before signing and installing a replacement. Concurrent
+`refreshToken()`, `getToken()`, and `getCredentials()` calls share the same
+replacement operation, including a background refresh already in progress or in
+retry backoff. If the replacement cannot be signed, the rejected token remains
+invalidated and the failure is reported to the caller.
+
 The refresh thread is a daemon and does not keep the JVM alive. Close the manager
 to cancel background work; token requests after close throw
 `TokenRefreshException`.
@@ -146,6 +154,30 @@ RedisCredentialsProvider credentialsProvider = new RedisCredentialsProvider() {
     }
 };
 ```
+
+If the client reports an AUTH rejection, discard that connection before forcing a
+refresh and beginning the next bounded connection attempt:
+
+```java
+try {
+    return openConnection(credentialsProvider);
+} catch (RedisAuthenticationException authFailure) {
+    // Never return the rejected connection to the pool.
+    closeRejectedConnection();
+
+    // Resolve AWS credentials again and install a replacement token. The next
+    // openConnection call obtains it through credentialsProvider.
+    auth.refreshToken();
+    throw authFailure; // Let the existing bounded reconnect policy retry.
+}
+```
+
+`RedisAuthenticationException`, `openConnection`, and
+`closeRejectedConnection` represent the corresponding hooks in your client or
+connection pool. Forced refresh is recovery from a rejected cached token, not
+proof that the IAM user, policy, cache, or region is configured correctly.
+Persistent configuration errors should still surface after the client's normal
+connection-attempt limit.
 
 Run the complete
 [`ConnectWithLettuce`](examples/src/main/java/software/amazon/elasticache/examples/ConnectWithLettuce.java)
