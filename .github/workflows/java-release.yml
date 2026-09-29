@@ -1,0 +1,110 @@
+name: Publish Java package to Maven Central
+
+# A java-v* release tests every supported Java version, then signs the artifacts and
+# publishes them to Maven Central through the Central Portal, after approval.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# cancel-in-progress: false — cancelling mid-upload can leave a deployment half done.
+concurrency:
+  group: java-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Source of truth for the test matrix: java.supported.versions in pom.xml.
+  # java-v* releases only — test/publish inherit this via `needs`.
+  versions:
+    name: java versions
+    if: startsWith(github.ref_name, 'java-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      data: ${{ steps.set.outputs.data }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load supported versions from pom.xml
+        id: set
+        run: echo "data=$(python3 scripts/java_dev.py list-supported-versions)" >> "$GITHUB_OUTPUT"
+
+  # Full support matrix gates the release. Ubuntu only: the CI workflow already covers
+  # Windows and macOS. No dependency caching in release jobs.
+  test:
+    name: test (Java ${{ matrix.java-version }})
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false  # report every version, not just the first failure
+      matrix:
+        java-version: ${{ fromJson(needs.versions.outputs.data).all }}
+    defaults:
+      run:
+        working-directory: java
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java ${{ matrix.java-version }}
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: corretto
+          java-version: ${{ matrix.java-version }}
+
+      - name: Build and test
+        run: mvn --batch-mode --no-transfer-progress install
+
+      - name: Run installed-artifact integration tests
+        run: mvn --batch-mode --no-transfer-progress --file integration-tests/pom.xml verify
+
+  publish:
+    name: publish to Maven Central
+    needs: [versions, test]
+    # A fork that copies this workflow and its tags cannot publish.
+    if: startsWith(github.ref_name, 'java-v') && github.repository_owner == 'aws'
+    runs-on: ubuntu-latest
+    # Publishing can take up to 60 minutes and the smoke test up to ~45.
+    timeout-minutes: 120
+    # Holds the Central token and signing key. Its required-reviewer gate is the
+    # approval to publish.
+    environment: maven
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Tag must match the pom version, which must not be a SNAPSHOT, and the
+      # CHANGELOG must have an entry.
+      - name: Verify the tag matches the pom version
+        run: python3 scripts/java_dev.py verify "$GITHUB_REF_NAME"
+
+      # Writes a settings.xml whose `central` server and GPG passphrase read the
+      # environment variables named below, and imports the signing key.
+      - name: Set up Java with the Central credentials and signing key
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: corretto
+          java-version: ${{ fromJson(needs.versions.outputs.data).max }}
+          server-id: central
+          server-username: CENTRAL_TOKEN_USERNAME
+          server-password: CENTRAL_TOKEN_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # Tests already ran in the test job. The plugin uploads, waits for validation,
+      # publishes, and fails this step if any of that fails.
+      - name: Sign and publish to Maven Central
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: mvn --batch-mode --no-transfer-progress --file java/pom.xml -P release -DskipTests deploy
+
+      # Retries for up to ~45 minutes: Maven Central lags behind a publish.
+      - name: Smoke-test Maven Central
+        run: python3 scripts/java_dev.py smoke "${GITHUB_REF_NAME#java-v}"
