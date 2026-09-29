@@ -5,6 +5,7 @@ node_modules/
 
 # npm
 *.tgz
+pack/
 npm-debug.log*
 
 # Test / coverage output
