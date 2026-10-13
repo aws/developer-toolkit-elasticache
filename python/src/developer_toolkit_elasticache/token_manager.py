@@ -16,9 +16,12 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from botocore.session import Session
+
+if TYPE_CHECKING:
+    from botocore.credentials import Credentials
 
 from developer_toolkit_elasticache.errors import InvalidParameterError, TokenRefreshError
 from developer_toolkit_elasticache.token_generator import (
@@ -124,6 +127,7 @@ class ElastiCacheIAMAuthTokenManager:
         serverless_cache_name: str | None = None,
         replication_group_id: str | None = None,
         session: Session | None = None,
+        credentials: "Credentials | None" = None,
         refresh_after: float = DEFAULT_REFRESH_AFTER_SECONDS,
         on_token_changed: Callable[[str], None] | None = None,
     ):
@@ -133,6 +137,7 @@ class ElastiCacheIAMAuthTokenManager:
             serverless_cache_name=serverless_cache_name,
             replication_group_id=replication_group_id,
             session=session,
+            credentials=credentials,
         )
         self._refresh_after = _validate_refresh_after(refresh_after)
         self._on_token_changed = on_token_changed

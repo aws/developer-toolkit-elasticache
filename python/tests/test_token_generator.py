@@ -5,7 +5,7 @@ import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.credentials import Credentials
+from botocore.credentials import Credentials, RefreshableCredentials
 from helpers import (
     CACHE,
     REGION,
@@ -501,3 +501,70 @@ def test_known_answer_signatures_differ_by_resource_type():
     serverless = _generate_at_fixed_time(serverless_cache_name=_KAT_CACHE)
     node_based = _generate_at_fixed_time(replication_group_id=_KAT_CACHE)
     assert serverless != node_based
+
+
+class TestSuppliedCredentials:
+    """``credentials`` lets a caller sign with an object it already holds, with no session."""
+
+    def test_signs_with_the_supplied_credentials(self):
+        token = generate_iam_auth_token(
+            serverless_cache_name="my-cache",
+            user_id="default.iam-user",
+            region="us-east-1",
+            credentials=Credentials("AKIASUPPLIED", "secret"),
+        )
+
+        assert "AKIASUPPLIED" in token
+
+    def test_supplied_credentials_win_over_a_session(self):
+        """Both are accepted; the explicit object is the one that signs."""
+        token = generate_iam_auth_token(
+            serverless_cache_name="my-cache",
+            user_id="default.iam-user",
+            region="us-east-1",
+            session=fake_session(),
+            credentials=Credentials("AKIASUPPLIED", "secret"),
+        )
+
+        assert "AKIASUPPLIED" in token
+
+    def test_provider_signs_with_the_supplied_credentials(self):
+        provider = ElastiCacheIAMAuthTokenProvider(
+            serverless_cache_name="my-cache",
+            user_id="default.iam-user",
+            region="us-east-1",
+            credentials=Credentials("AKIASUPPLIED", "secret"),
+        )
+
+        assert "AKIASUPPLIED" in provider.get_token()
+
+    def test_rereads_supplied_credentials_so_rotation_is_picked_up(self):
+        calls = {"n": 0}
+
+        def refresh():
+            calls["n"] += 1
+            return {
+                "access_key": f"AKIAROTATED{calls['n']}",
+                "secret_key": "secret",
+                "token": "token",
+                "expiry_time": (
+                    datetime.datetime.now(datetime.timezone.utc)
+                    + datetime.timedelta(minutes=30)
+                ).isoformat(),
+            }
+
+        credentials = RefreshableCredentials.create_from_metadata(
+            refresh(), refresh, "assume-role"
+        )
+        provider = ElastiCacheIAMAuthTokenProvider(
+            serverless_cache_name="my-cache",
+            user_id="default.iam-user",
+            region="us-east-1",
+            credentials=credentials,
+        )
+
+        assert "AKIAROTATED1" in provider.get_token()
+        credentials._expiry_time = datetime.datetime.now(
+            datetime.timezone.utc
+        ) - datetime.timedelta(minutes=1)
+        assert "AKIAROTATED2" in provider.get_token()
