@@ -20,6 +20,11 @@ All notable changes to the Python package are documented here. The format follow
   refresh could replace it, or after `close()`; `__cause__` is the last refresh error.
   Not a `ToolkitInputError`.
 - `DEFAULT_REFRESH_AFTER_SECONDS` constant.
+- `credentials` parameter on `generate_iam_auth_token()`,
+  `ElastiCacheIAMAuthTokenProvider`, and `ElastiCacheIAMAuthTokenManager` — signs with a
+  botocore credentials object the caller already holds, such as the one behind an existing
+  boto3 client, instead of resolving the credential chain. Takes precedence over `session`,
+  and is re-read for every token, so a refreshable object's rotation is still picked up.
 
 ## [1.0.0] - Unreleased
 

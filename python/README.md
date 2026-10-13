@@ -73,6 +73,27 @@ Missing credentials are reported when a token is requested. Expired or otherwise
 invalid credentials cannot be detected during local signing: token generation can
 succeed, but ElastiCache will reject the token when the client connects.
 
+**Bringing your own credentials**
+
+Pass `credentials` to sign with a botocore credentials object you already hold — the one
+behind an existing boto3 client, for instance — instead of resolving the chain:
+
+```python
+from developer_toolkit_elasticache import generate_iam_auth_token
+
+token = generate_iam_auth_token(
+    serverless_cache_name="my-cache",
+    user_id="default.iam-user",
+    region="us-east-1",
+    credentials=credentials,
+)
+```
+
+`credentials` takes precedence over `session` and is accepted by
+`ElastiCacheIAMAuthTokenProvider` and `ElastiCacheIAMAuthTokenManager` too. It is re-read
+for every token, so a refreshable object (SSO, assume-role, container, instance metadata)
+keeps rotating exactly as the credential chain would.
+
 ### Reconnecting clients
 
 Clients such as redis-py and valkey-py request credentials on every reconnection.
