@@ -19,7 +19,6 @@ dependencies = [
     "botocore>=1.43.0",
 ]
 classifiers = [
-    "Private :: Do Not Upload",
     "Development Status :: 5 - Production/Stable",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",

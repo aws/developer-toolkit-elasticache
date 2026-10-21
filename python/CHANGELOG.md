@@ -26,7 +26,7 @@ All notable changes to the Python package are documented here. The format follow
   boto3 client, instead of resolving the credential chain. Takes precedence over `session`,
   and is re-read for every token, so a refreshable object's rotation is still picked up.
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-09-15
 
 Initial release.
 
