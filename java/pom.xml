@@ -10,7 +10,7 @@
 
     <groupId>software.amazon.elasticache</groupId>
     <artifactId>developer-toolkit-elasticache</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <name>Developer Toolkit for Amazon ElastiCache</name>
     <description>Developer toolkit for Amazon ElastiCache</description>
     <url>https://github.com/aws/developer-toolkit-elasticache</url>
