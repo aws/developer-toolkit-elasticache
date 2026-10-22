@@ -4,6 +4,28 @@ All notable changes to the Python package are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-21
+
+### Added
+
+- `ElastiCacheIAMAuthTokenManager` — caches a token for 880 seconds (its 900-second
+  lifetime minus a 20-second serve margin) and refreshes it on a background daemon
+  thread `refresh_after` seconds after signing (default 300). Concurrent callers share
+  a single signing cycle and its outcome; failed refreshes are retried with jittered
+  exponential backoff while the current token is still served, with a warning logged
+  per failed cycle; `on_token_changed` reports each new token; `get_credentials()`
+  returns `(user_id, token)`; `refresh_token()` signs a replacement on demand;
+  `close()` or a `with` block stops background work.
+- `TokenRefreshError` — raised by the manager when a cached token expired before a
+  refresh could replace it, or after `close()`; `__cause__` is the last refresh error.
+  Not a `ToolkitInputError`.
+- `DEFAULT_REFRESH_AFTER_SECONDS` constant.
+- `credentials` parameter on `generate_iam_auth_token()`,
+  `ElastiCacheIAMAuthTokenProvider`, and `ElastiCacheIAMAuthTokenManager` — signs with a
+  botocore credentials object the caller already holds, such as the one behind an existing
+  boto3 client, instead of resolving the credential chain. Takes precedence over `session`,
+  and is re-read for every token, so a refreshable object's rotation is still picked up.
+
 ## [1.0.0] - 2026-09-15
 
 Initial release.
@@ -21,4 +43,5 @@ Initial release.
   caller-provided values.
 - Examples for redis-py and valkey-py under `examples/`.
 
+[1.1.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/python-v1.1.0
 [1.0.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/python-v1.0.0

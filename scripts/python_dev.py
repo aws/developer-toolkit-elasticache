@@ -36,6 +36,8 @@ PYPROJECT = PYTHON_DIR / "pyproject.toml"
 PACKAGE = "developer-toolkit-elasticache"
 IMPORT_NAME = "developer_toolkit_elasticache"
 DO_NOT_UPLOAD = "Private :: Do Not Upload"
+# Only release versions (X.Y.Z) are published; no prereleases.
+_RELEASE_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
 _COMMANDS = {
@@ -148,6 +150,12 @@ def verify(args: argparse.Namespace) -> int:
         print(
             "::error::Release tag does not match the version in pyproject.toml "
             f"({pkg_version}). Bump the version and re-tag."
+        )
+        return 1
+    if not _RELEASE_VERSION.fullmatch(pkg_version):
+        print(
+            f"::error::Version {pkg_version} is a prerelease. Only release versions "
+            "(X.Y.Z) are published."
         )
         return 1
     if DO_NOT_UPLOAD in project.get("classifiers", []):

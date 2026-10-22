@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes to the Java package will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this package uses [Semantic Versioning](https://semver.org/).
+
+## [1.0.0] - 2026-10-21
+
+### Added
+
+- Initial Java IAM authentication token generator for serverless caches and
+  node-based replication groups.
+- Input validation, lowercase normalization, AWS region and credential resolution,
+  typed user-correctable errors, and deterministic SigV4 signing tests.
+- Credential providers that fail or return unusable credentials are normalized to
+  an actionable `ConfigurationException`.
+- `ElastiCacheIamAuthTokenManager` for caching tokens, refreshing them in the
+  background before expiry, retrying transient failures, and notifying a
+  token-change callback.
+- `ElastiCacheIamAuthTokenManager.refreshToken()` for replacing a rejected cached
+  token without waiting for scheduled refresh while sharing concurrent and
+  background refresh work.
+- `TokenRefreshException` for closed managers and refreshes that cannot replace
+  an expired token.
+- Maven build, Java version CI matrix, documentation, and dependency updates.
+
+### Notes
+
+- Region resolution follows the Java contract: explicit region, then `AWS_REGION`,
+  then the standard AWS SDK region provider chain. Unlike botocore, the AWS SDK for
+  Java does not read `AWS_DEFAULT_REGION`.
+- Java examples demonstrate Lettuce `RedisCredentialsProvider` integration and the
+  raw TLS/Redis protocol exchange for custom clients and proxies. The wire-level
+  example verifies the endpoint hostname during the TLS handshake.
+
+[1.0.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/java-v1.0.0

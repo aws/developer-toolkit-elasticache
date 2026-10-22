@@ -12,7 +12,10 @@ updates:
       actions:
         patterns: ["*"]
 
-  # Python runtime/dev deps in python/pyproject.toml.
+  # Python: runtime deps in python/pyproject.toml and the pinned dev/build/publish
+  # tooling in python/requirements/dev.txt. One entry covers both, because Dependabot
+  # scans a directory recursively for pyproject.toml and requirements *.txt files; a
+  # second entry for python/requirements produced a duplicate PR for every bump.
   - package-ecosystem: pip
     directory: /python
     schedule:
@@ -21,12 +24,29 @@ updates:
       python:
         patterns: ["*"]
 
-  # Pinned dev/build/publish tooling in python/requirements/dev.txt (ruff, pytest,
-  # build, twine). Dependabot discovers the *.txt files in this directory.
-  - package-ecosystem: pip
-    directory: /python/requirements
+  # Node runtime/dev dependencies in node/package.json.
+  - package-ecosystem: npm
+    directory: /node
     schedule:
       interval: weekly
     groups:
-      tooling:
+      node:
+        patterns: ["*"]
+
+  # Java runtime and test dependencies in java/pom.xml.
+  - package-ecosystem: maven
+    directory: /java
+    schedule:
+      interval: weekly
+    groups:
+      java:
+        patterns: ["*"]
+
+  # Standalone Java example build plugins.
+  - package-ecosystem: maven
+    directory: /java/examples
+    schedule:
+      interval: weekly
+    groups:
+      java-examples:
         patterns: ["*"]

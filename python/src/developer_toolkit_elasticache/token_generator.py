@@ -16,7 +16,7 @@ from developer_toolkit_elasticache.errors import (
 )
 
 if TYPE_CHECKING:
-    from botocore.credentials import ReadOnlyCredentials
+    from botocore.credentials import Credentials, ReadOnlyCredentials
 
 
 _TOKEN_TTL_SECONDS = 900  # 15 minutes
@@ -104,13 +104,16 @@ def _resolve_region(region: str | None, session: Session) -> str:
     return resolved
 
 
-def _resolve_credentials(session: Session) -> "ReadOnlyCredentials":
-    """Read a frozen credential set from the session's credential chain.
+def _resolve_credentials(
+    session: Session, credentials: "Credentials | None" = None
+) -> "ReadOnlyCredentials":
+    """Read a frozen credential set from ``credentials``, or the session's credential chain.
 
     Called on every token request rather than cached, so rotated credentials
-    (SSO, assume-role, container, instance metadata) are picked up automatically.
+    (SSO, assume-role, container, instance metadata) are picked up automatically,
+    including through a supplied credentials object, which refreshes itself.
     """
-    credentials = session.get_credentials()
+    credentials = credentials or session.get_credentials()
     if credentials is None:
         raise ConfigurationError(_NO_CREDENTIALS_MESSAGE)
     return credentials.get_frozen_credentials()
@@ -156,13 +159,14 @@ def _sign_token(
     return request.url.removeprefix(_URL_SCHEME_PREFIX)
 
 
-def generate_iam_auth_token(
+def generate_iam_auth_token(  # noqa: PLR0913  # keyword-only signing parameters
     *,
     user_id: str,
     region: str | None = None,
     serverless_cache_name: str | None = None,
     replication_group_id: str | None = None,
     session: Session | None = None,
+    credentials: "Credentials | None" = None,
 ) -> str:
     """Generate an ElastiCache IAM auth token using the default AWS credential chain.
 
@@ -176,14 +180,16 @@ def generate_iam_auth_token(
     passed to sign for a region other than the configured one.
 
     Pass ``session`` to sign with a specific botocore session; by default a new
-    session resolves credentials from the standard chain.
+    session resolves credentials from the standard chain. Pass ``credentials`` to sign
+    with a credentials object you already hold, such as the one behind an existing
+    client; it takes precedence over the session.
     """
     cache_name, serverless = _resolve_target(serverless_cache_name, replication_group_id)
     session = session or Session()
     resolved_region = _resolve_region(region, session)
-    credentials = _resolve_credentials(session)
+    resolved_credentials = _resolve_credentials(session, credentials)
     return _sign_token(
-        cache_name, user_id, resolved_region, credentials, serverless=serverless
+        cache_name, user_id, resolved_region, resolved_credentials, serverless=serverless
     )
 
 
@@ -199,13 +205,14 @@ class ElastiCacheIAMAuthTokenProvider:
     ``region`` defaults to the region the session resolves, so it only needs to be
     passed to sign for a region other than the configured one.
 
-    Credentials come from the default AWS credential chain (env vars, shared
-    config/credentials, or the instance/container role). They are re-read on
+    Credentials come from ``credentials`` when supplied, otherwise from the default AWS
+    credential chain (env vars, shared config/credentials, or the instance/container
+    role). They are re-read on
     every call, so rotated credentials (SSO, assume-role, container, instance
     metadata) are picked up automatically.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # keyword-only signing parameters
         self,
         *,
         user_id: str,
@@ -213,11 +220,13 @@ class ElastiCacheIAMAuthTokenProvider:
         serverless_cache_name: str | None = None,
         replication_group_id: str | None = None,
         session: Session | None = None,
+        credentials: "Credentials | None" = None,
     ):
         self._cache_name, self._serverless = _resolve_target(
             serverless_cache_name, replication_group_id
         )
         self._user_id = _validate_and_normalize("user_id", user_id, _USER_ID_PATTERN)
+        self._credentials = credentials
         self._session = session or Session()
         # Resolved once here rather than per call: unlike credentials, the region is
         # static configuration, and a missing region should surface at construction
@@ -230,7 +239,7 @@ class ElastiCacheIAMAuthTokenProvider:
 
     def get_token(self) -> str:
         """Sign and return a fresh IAM auth token."""
-        credentials = _resolve_credentials(self._session)
+        credentials = _resolve_credentials(self._session, self._credentials)
         return _sign_token(
             self._cache_name,
             self._user_id,

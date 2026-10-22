@@ -33,3 +33,13 @@ class ConfigurationError(ToolkitInputError):
 
     Covers the missing-configuration cases (no region or no credentials).
     """
+
+
+class TokenRefreshError(Exception):
+    """A cached token could not be refreshed before it expired, or the token
+    manager was closed.
+
+    Raised only by ``ElastiCacheIAMAuthTokenManager``. This is an operational
+    failure rather than an input error, so it does not extend ``ToolkitInputError``.
+    When a refresh failed, ``__cause__`` is the error from the last refresh attempt.
+    """
