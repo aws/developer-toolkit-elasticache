@@ -21,7 +21,7 @@ Add the dependency to another Maven project:
 <dependency>
     <groupId>software.amazon.elasticache</groupId>
     <artifactId>developer-toolkit-elasticache</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 

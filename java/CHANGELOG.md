@@ -5,7 +5,7 @@ All notable changes to the Java package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this package uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] - 2026-10-21
 
 ### Added
 
@@ -33,3 +33,5 @@ and this package uses [Semantic Versioning](https://semver.org/).
 - Java examples demonstrate Lettuce `RedisCredentialsProvider` integration and the
   raw TLS/Redis protocol exchange for custom clients and proxies. The wire-level
   example verifies the endpoint hostname during the TLS handshake.
+
+[1.0.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/java-v1.0.0

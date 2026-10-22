@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "developer-toolkit-elasticache"
-version = "1.0.0"
+version = "1.1.0"
 description = "Developer toolkit for Amazon ElastiCache"
 readme = "README.md"
 license = "Apache-2.0"
@@ -19,7 +19,6 @@ dependencies = [
     "botocore>=1.43.0",
 ]
 classifiers = [
-    "Private :: Do Not Upload",
     "Development Status :: 5 - Production/Stable",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",

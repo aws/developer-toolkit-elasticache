@@ -1,6 +1,6 @@
 {
   "name": "@aws/developer-toolkit-elasticache",
-  "version": "0.1.0-dev.0",
+  "version": "1.0.0",
   "description": "Developer toolkit for Amazon ElastiCache",
   "repository": {
     "type": "git",
@@ -10,7 +10,6 @@
   "homepage": "https://github.com/aws/developer-toolkit-elasticache/tree/main/node#readme",
   "bugs": "https://github.com/aws/developer-toolkit-elasticache/issues",
   "type": "module",
-  "private": true,
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22"

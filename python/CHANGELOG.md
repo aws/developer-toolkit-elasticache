@@ -4,7 +4,7 @@ All notable changes to the Python package are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-10-21
 
 ### Added
 
@@ -26,7 +26,7 @@ All notable changes to the Python package are documented here. The format follow
   boto3 client, instead of resolving the credential chain. Takes precedence over `session`,
   and is re-read for every token, so a refreshable object's rotation is still picked up.
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-09-15
 
 Initial release.
 
@@ -43,4 +43,5 @@ Initial release.
   caller-provided values.
 - Examples for redis-py and valkey-py under `examples/`.
 
+[1.1.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/python-v1.1.0
 [1.0.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/python-v1.0.0

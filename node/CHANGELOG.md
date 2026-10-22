@@ -4,7 +4,7 @@ All notable changes to the Node.js package are documented here. The format follo
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] - 2026-10-21
 
 ### Added
 
@@ -19,3 +19,5 @@ All notable changes to the Node.js package are documented here. The format follo
 - `ToolkitInputError`, `InvalidParameterError`, `ConfigurationError`, and
   `TokenRefreshError`.
 - Runnable token-generation and iovalkey integration examples under `examples/`.
+
+[1.0.0]: https://github.com/aws/developer-toolkit-elasticache/releases/tag/node-v1.0.0
