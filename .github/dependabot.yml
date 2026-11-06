@@ -1,9 +1,12 @@
 # Keeps pinned dependencies current. Takes effect only on the default branch.
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates
+#
+# One entry per ecosystem, each with a single group, so every weekly run opens at
+# most one PR per ecosystem. An ecosystem that spans several directories lists them
+# under `directories`; Dependabot then groups the bumps across all of them.
 version: 2
 updates:
   # GitHub Actions: bumps the SHA pins and their `# vX.Y.Z` comments in workflows.
-  # Grouped into one PR to avoid five separate bumps.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -13,9 +16,9 @@ updates:
         patterns: ["*"]
 
   # Python: runtime deps in python/pyproject.toml and the pinned dev/build/publish
-  # tooling in python/requirements/dev.txt. One entry covers both, because Dependabot
-  # scans a directory recursively for pyproject.toml and requirements *.txt files; a
-  # second entry for python/requirements produced a duplicate PR for every bump.
+  # tooling in python/requirements/dev.txt. Dependabot scans the directory
+  # recursively, so one entry covers both; a second entry for python/requirements
+  # produced a duplicate PR for every bump.
   - package-ecosystem: pip
     directory: /python
     schedule:
@@ -32,21 +35,28 @@ updates:
     groups:
       node:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint pins a TypeScript peer range; a TypeScript major outside it
+      # makes `npm ci` fail. Bump TypeScript by hand when typescript-eslint supports it.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # @types/node tracks the oldest supported Node (engines.node), not the newest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
-  # Java runtime and test dependencies in java/pom.xml.
+  # Java: the library, the documentation examples and the installed-artifact
+  # integration tests, in one PR.
   - package-ecosystem: maven
-    directory: /java
+    directories:
+      - /java
+      - /java/examples
+      - /java/integration-tests
     schedule:
       interval: weekly
     groups:
       java:
         patterns: ["*"]
-
-  # Standalone Java example build plugins.
-  - package-ecosystem: maven
-    directory: /java/examples
-    schedule:
-      interval: weekly
-    groups:
-      java-examples:
-        patterns: ["*"]
+    ignore:
+      # JUnit 6 requires Java 17; the library supports Java 8+.
+      - dependency-name: "org.junit.jupiter:*"
+        update-types: ["version-update:semver-major"]
