@@ -4,14 +4,14 @@
 # Requires Python 3.11+
 
 # install
-pip==26.2.1
+pip==26.3
 
 # build
 build==1.6.1
 
 # dev
-ruff==0.17.1
-pytest==9.1.1
+ruff==0.17.3
+pytest==9.2.0
 
 # publish
 twine==7.0.0
