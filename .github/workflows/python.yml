@@ -70,9 +70,9 @@ jobs:
             python-version: "${{ fromJson(needs.versions.outputs.data).min }}"
           - os: windows-latest
             python-version: "${{ fromJson(needs.versions.outputs.data).max }}"
-          - os: macos-14
+          - os: macos-latest
             python-version: "${{ fromJson(needs.versions.outputs.data).min }}"
-          - os: macos-14
+          - os: macos-latest
             python-version: "${{ fromJson(needs.versions.outputs.data).max }}"
 
     steps:
