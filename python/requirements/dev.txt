@@ -10,7 +10,7 @@ pip==26.3
 build==1.6.1
 
 # dev
-ruff==0.17.5
+ruff==0.17.6
 pytest==9.2.0
 
 # publish
